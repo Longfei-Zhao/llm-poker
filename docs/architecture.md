@@ -1,131 +1,68 @@
-# 项目架构设计文档
+# 项目架构
 
-## 1. 系统架构
-
-### 1.1 前端架构（Flutter）
+三个独立服务，职责清晰分离：
 
 ```
-frontend/
-├── lib/
-│   ├── components/           # UI组件
-│   │   ├── game_table.dart      # 游戏桌面
-│   │   ├── player_view.dart     # 玩家视图
-│   │   ├── card_view.dart       # 扑克牌视图
-│   │   └── action_panel.dart    # 操作面板
-│   ├── models/              # 数据模型
-│   │   ├── game_state.dart      # 游戏状态
-│   │   ├── player.dart          # 玩家模型
-│   │   └── poker_card.dart      # 扑克牌模型
-│   ├── services/            # 服务
-│   │   ├── websocket_service.dart  # WebSocket通信
-│   │   ├── game_service.dart      # 游戏逻辑
-│   │   └── animation_service.dart  # 动画服务
-│   └── utils/               # 工具类
-│       ├── card_utils.dart      # 扑克牌工具
-│       └── math_utils.dart      # 数学计算工具
+Flutter Web 前端  <--WebSocket-->  Node.js 后端  <--HTTP-->  FastAPI AI 服务  <-->  各 LLM API
+   （观战界面）                     （德扑引擎）              （模型代理）
 ```
 
-### 1.2 后端架构（Node.js）
+## backend/ — 游戏引擎（Node.js）
 
 ```
-backend/
-├── src/
-│   ├── controllers/         # 控制器
-│   │   ├── game.controller.js    # 游戏控制
-│   │   ├── player.controller.js  # 玩家控制
-│   │   └── ws.controller.js      # WebSocket控制
-│   ├── models/             # 数据模型
-│   │   ├── game.model.js        # 游戏模型
-│   │   ├── player.model.js      # 玩家模型
-│   │   └── card.model.js        # 扑克牌模型
-│   ├── services/           # 服务层
-│   │   ├── game.service.js      # 游戏服务
-│   │   ├── ai.service.js        # AI服务
-│   │   └── ws.service.js        # WebSocket服务
-│   └── utils/              # 工具类
-│       ├── poker.utils.js       # 扑克牌工具
-│       └── validator.utils.js   # 验证工具
-└── tests/                  # 测试文件
+src/
+├── index.js               # HTTP + WebSocket 服务器入口，健康检查，优雅关闭
+├── config/index.js        # 端口、盲注（SMALL_BLIND/BIG_BLIND）、日志级别，均可用环境变量覆盖
+├── services/
+│   ├── game.service.js    # 无限注德扑规则引擎：发牌、下注轮、全下、边池、最小加注、摊牌（pokersolver）
+│   ├── ws.service.js      # 前端 WebSocket 协议 + AI 决策编排；按接收方过滤状态（AI 视角不含对手底牌与牌堆）
+│   └── ai.service.js      # AI 服务 HTTP 客户端（axios）
+└── utils/logger.js        # 分级日志
 ```
 
-### 1.3 AI服务架构
+引擎与传输层分离：`game.service.js` 不知道 WebSocket 的存在，所有规则可用纯单元测试覆盖（含边池分配与筹码守恒）。
+
+## ai_service/ — 模型代理（Python / FastAPI）
 
 ```
-ai_service/
-├── src/
-│   ├── agents/             # AI代理
-│   │   ├── base_agent.py       # 基础代理类
-│   │   └── llm_agent.py        # LLM代理实现
-│   ├── prompts/            # 提示词模板
-│   │   ├── game_state.py       # 游戏状态提示
-│   │   └── decision.py         # 决策提示
-│   └── utils/              # 工具类
-│       ├── probability.py      # 概率计算
-│       └── card_eval.py        # 牌型评估
-└── tests/                  # 测试文件
+src/
+├── main.py                        # FastAPI 端点：POST /api/agents、POST /api/decision、GET /api/health 等
+├── config/agent_config.py         # 提供商配置表（默认模型、密钥环境变量、API base）——唯一来源
+├── exceptions.py                  # AIServiceError 层级，统一映射为 HTTP 状态码
+├── agents/
+│   ├── base_agent.py              # 抽象基类：make_decision 契约、动作校验、安全默认动作
+│   ├── llm_factory.py             # 按提供商注册/创建代理，支持别名（google -> gemini）
+│   ├── openai_compatible_agent.py # OpenAI、DeepSeek、Qwen、Grok、Sonar 共用（OpenAI 兼容协议）
+│   ├── anthropic_agent.py         # Claude（AsyncAnthropic）
+│   ├── gemini_agent.py            # Google Gemini
+│   └── local_llm_agent.py         # 本地 transformers 模型（可选依赖，未装 torch 时报配置错误）
+└── prompts/
+    ├── prompt_utils.py            # 提示词构建（位置、行动历史）+ 多层降级解析（JSON -> 代码块 -> 正则 -> 默认动作）
+    └── card_formatter.py          # 卡牌的人类可读表示
 ```
 
-## 2. 关键技术实现
+所有代理均为异步实现，多个模型的决策请求不会互相阻塞。每次决策写入一行结构化 JSONL 日志（提供商、模型、动作、金额、延迟），作为后续胜率分析的数据集。
 
-### 2.1 游戏引擎
-- 使用状态机管理游戏流程
-- 实现标准德州扑克规则
-- 处理所有游戏逻辑和状态转换
+## frontend/ — 观战界面（Flutter Web）
 
-### 2.2 AI决策系统
-- 使用大模型API进行决策
-- 设计合适的提示词模板
-- 实现概率计算和策略评估
-
-### 2.3 实时通信
-- 使用WebSocket进行实时数据传输
-- 实现游戏状态同步
-- 处理断线重连
-
-### 2.4 前端渲染
-- 使用Flutter实现跨平台UI
-- 实现流畅的动画效果
-- 优化性能和用户体验
-
-## 3. 数据流
-
-### 3.1 游戏状态更新流程
 ```
-[游戏引擎] → [状态更新] → [WebSocket广播] → [前端更新] → [UI渲染]
+lib/
+├── main.dart                      # 入口，直接进入 GameScreen
+├── constants.dart                 # 游戏常量与服务地址（--dart-define 可覆盖）
+├── screens/game_screen.dart       # 主界面：牌桌、控制按钮、状态面板
+├── components/
+│   ├── game_table.dart            # 赛道形牌桌绘制、卡牌渲染、下注显示
+│   └── player_view.dart           # 单个玩家席位
+├── models/                        # GameState / Player / PokerCard / ThinkingRecord，容错的 fromJson
+├── services/
+│   ├── websocket_service.dart     # 纯传输层：指数退避重连、心跳、类型化连接状态
+│   └── ai_service.dart            # AI 服务健康检查等直连接口
+└── utils/player_merge.dart        # 状态更新时保留本地已知的模型/座位信息
 ```
 
-### 3.2 AI决策流程
-```
-[游戏状态] → [AI代理] → [LLM API] → [决策结果] → [游戏引擎]
-```
+## 关键设计决策
 
-## 4. 开发计划
-
-1. 环境搭建
-   - 设置Flutter开发环境
-   - 配置Node.js后端
-   - 准备AI服务环境
-
-2. 核心功能开发
-   - 实现基础游戏引擎
-   - 开发AI决策系统
-   - 构建实时通信模块
-
-3. 前端开发
-   - 设计UI界面
-   - 实现动画效果
-   - 优化用户体验
-
-4. 测试和优化
-   - 单元测试
-   - 集成测试
-   - 性能优化
-
-## 5. 技术栈选择
-
-- **前端**: Flutter (Dart)
-- **后端**: Node.js (Express)
-- **AI服务**: Python
-- **数据库**: MongoDB（可选）
-- **通信**: WebSocket
-- **AI模型**: OpenAI API / Anthropic API 
+- **信息隔离**：后端向 AI 服务发送的决策请求只包含行动玩家自己的底牌 + 公共信息；牌堆从不离开引擎。前端作为观战视角显示所有底牌（刻意为之）。
+- **容错解析**：LLM 输出不可靠，解析链逐层降级，最终落到最安全的合法动作，保证任何模型的幻觉都不会中断牌局。
+- **单一事实来源**：盲注等规则常量只在 `backend/src/config/index.js` 定义；提供商信息只在 `agent_config.py` 定义。
+- **可测试性**：三端共 181 个测试（backend 53 / ai_service 80 / frontend 48），CI 每次 push 全量运行。
