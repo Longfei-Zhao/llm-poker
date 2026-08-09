@@ -1,33 +1,80 @@
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, List, Optional
-import os
 import json
+import logging
+import os
+import time
 from dotenv import load_dotenv
 
 from .agents.llm_factory import LLMFactory
 from .agents.base_agent import BaseAgent
+from .config.agent_config import get_api_key, get_provider_config
+from .exceptions import AIServiceError, ConfigError, PlayerError
 
 # 加载环境变量
 load_dotenv()
-print("🔧 环境变量加载完成")
 
-app = FastAPI(title="扑克AI服务")
+# 配置日志：只在这里配置一次
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
-# 配置CORS
+# 决策日志：每个决策输出一行结构化JSON到decisions.log（同时经root logger输出到控制台），
+# 作为后续"哪个LLM赢"分析的数据集
+decision_logger = logging.getLogger("decisions")
+if not decision_logger.handlers:
+    _decisions_file = logging.FileHandler(
+        os.getenv("DECISIONS_LOG_FILE", "decisions.log"), encoding="utf-8"
+    )
+    _decisions_file.setFormatter(logging.Formatter("%(message)s"))
+    decision_logger.addHandler(_decisions_file)
+decision_logger.setLevel(logging.INFO)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 启动：初始化LLM工厂
+    LLMFactory.init()
+    providers = LLMFactory.get_user_facing_providers()
+    logger.info("扑克AI服务启动，支持的LLM提供商: %s", ", ".join(providers))
+    yield
+    # 关闭：清理代理实例
+    logger.info("扑克AI服务关闭，清理 %d 个代理实例", len(agents))
+    agents.clear()
+
+app = FastAPI(title="扑克AI服务", lifespan=lifespan)
+
+# 配置CORS：本服务只被Node后端服务端调用，无需cookie凭证；
+# 浏览器来源通过环境变量配置，默认仅允许本地开发地址
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:8080").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 在生产环境中应该设置具体的源
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-print("🚀 FastAPI应用已初始化，CORS已配置")
 
 # 创建AI代理实例池
 agents: Dict[str, BaseAgent] = {}
-print(f"📋 AI代理实例池初始化完成，当前数量: {len(agents)}")
+
+@app.exception_handler(AIServiceError)
+async def ai_service_error_handler(request: Request, exc: AIServiceError) -> JSONResponse:
+    """将AIServiceError异常层次映射为对应的HTTP状态码"""
+    logger.error("%s %s 失败: [%s] %s", request.method, request.url.path, exc.error_code, exc.message)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.message, **exc.to_dict()},
+    )
 
 class CreateAgentRequest(BaseModel):
     """创建代理请求模型"""
@@ -70,223 +117,143 @@ class AgentInfo(BaseModel):
 async def create_agent(request: CreateAgentRequest) -> CreateAgentResponse:
     """
     创建AI代理。
-    
+
     Args:
         request: 创建代理请求
-        
+
     Returns:
         CreateAgentResponse: 创建代理响应
     """
-    print(f"📥 收到创建AI代理请求 - 玩家ID: {request.player_id}, 名称: {request.name}, 提供商: {request.provider}, 模型: {request.model or '默认'}")
-    try:
-        # 获取所有支持的提供商（包括别名）
-        supported_providers = list(LLMFactory._agents.keys()) + list(LLMFactory._provider_aliases.keys())
-        
-        # 检查提供商是否支持
-        if request.provider not in supported_providers:
-            print(f"❌ 不支持的LLM提供商: {request.provider}")
-            raise ValueError(f"不支持的LLM提供商: {request.provider}")
-            
-        # 获取实际的提供商名称（处理别名）
-        actual_provider = request.provider
-        if request.provider in LLMFactory._provider_aliases:
-            actual_provider = LLMFactory._provider_aliases[request.provider]
-            print(f"📝 提供商别名转换: {request.provider} → {actual_provider}")
-            
-        # 获取对应提供商的API密钥
-        api_key = os.getenv(f"{actual_provider.upper()}_API_KEY", "")
-        # 特殊处理perplexity，使用PPLX_API_KEY
-        if actual_provider == "perplexity":
-            api_key = os.getenv("PPLX_API_KEY", "")
-        if actual_provider == "aliyun":
-            api_key = os.getenv("DASHSCOPE_API_KEY", "")
-        if not api_key and actual_provider not in ["local"]:
-            print(f"❌ 未配置{actual_provider}的API密钥")
-            raise ValueError(f"未配置{actual_provider}的API密钥")
-        
-        print(f"✅ API密钥已找到: {actual_provider}")    
-        
-        # 创建代理实例
-        print(f"🔄 正在创建代理实例 - 提供商: {actual_provider}, 模型: {request.model or '默认'}")
-        agent = LLMFactory.create_agent(
-            provider=actual_provider,
-            player_id=request.player_id,
-            name=request.name,
-            api_key=api_key,
-            model=request.model,
-            temperature=request.temperature
-        )
-        
-        # 保存到代理池
-        agents[request.player_id] = agent
-        print(f"✅ 代理创建成功 - 玩家ID: {request.player_id}, 当前代理池大小: {len(agents)}")
-        
-        agent_model = agent.model_name if hasattr(agent, 'model_name') else agent.model
-        
-        # 获取用户友好的提供商名称，用于返回
-        user_provider = actual_provider
-        if actual_provider in LLMFactory._reverse_aliases:
-            user_provider = LLMFactory._reverse_aliases[actual_provider]
-            print(f"📝 提供商显示转换: {actual_provider} → {user_provider}")
-        
-        print(f"📤 返回代理信息 - 玩家ID: {agent.player_id}, 名称: {agent.name}, 提供商: {user_provider}, 模型: {agent_model}")
-        
-        return CreateAgentResponse(
-            player_id=agent.player_id,
-            name=agent.name,
-            provider=user_provider,
-            model=agent_model
-        )
-        
-    except Exception as e:
-        print(f"❌ 创建代理失败 - {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("收到创建AI代理请求 - 玩家ID: %s, 名称: %s, 提供商: %s, 模型: %s",
+                request.player_id, request.name, request.provider, request.model or "默认")
+
+    # 解析提供商（含别名），不支持时抛ProviderError → 400
+    actual_provider = LLMFactory.resolve_provider(request.provider)
+
+    # 从配置表读取对应提供商的API密钥
+    api_key = get_api_key(actual_provider) or ""
+    if not api_key and get_provider_config(actual_provider).api_key_env is not None:
+        raise ConfigError(f"未配置{actual_provider}的API密钥")
+
+    # 创建代理实例
+    agent = LLMFactory.create_agent(
+        provider=actual_provider,
+        player_id=request.player_id,
+        name=request.name,
+        api_key=api_key,
+        model=request.model,
+        temperature=request.temperature
+    )
+
+    # 保存到代理池
+    agents[request.player_id] = agent
+    logger.info("代理创建成功 - 玩家ID: %s, 当前代理池大小: %d", request.player_id, len(agents))
+
+    agent_model = getattr(agent, 'model', None) or getattr(agent, 'model_name', 'unknown')
+
+    return CreateAgentResponse(
+        player_id=agent.player_id,
+        name=agent.name,
+        provider=LLMFactory.display_provider(actual_provider),
+        model=agent_model
+    )
 
 @app.post("/api/decision", response_model=DecisionResponse)
 async def make_decision(request: DecisionRequest) -> DecisionResponse:
     """
     获取AI决策
-    
+
     参数:
         request: 决策请求
-        
+
     返回:
         DecisionResponse: 决策响应
     """
-    try:
-        print(f"获取AI决策: 玩家{request.player_id}, 有效动作: {', '.join(request.valid_actions)}")
-        
-        # 获取AI代理
-        agent = agents.get(request.player_id)
-        if not agent:
-            print(f"❌ 找不到玩家{request.player_id}的AI代理")
-            raise ValueError(f"找不到玩家{request.player_id}的AI代理")
-        
-        print(f"✅ 找到代理实例 - 玩家ID: {request.player_id}, 名称: {agent.name}")
-        
-        # 获取决策
-        action, amount, thinking = await agent.make_decision(
-            game_state=request.game_state,
-            valid_actions=request.valid_actions,
-            min_bet=request.min_bet,
-            max_bet=request.max_bet
-        )
-        
-        return DecisionResponse(action=action, amount=amount, thinking=thinking)
-        
-    except Exception as e:
-        print(f"获取AI决策失败: {str(e)}")
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+    logger.info("获取AI决策: 玩家%s, 有效动作: %s", request.player_id, ", ".join(request.valid_actions))
+
+    # 获取AI代理，不存在时抛PlayerError → 404
+    agent = agents.get(request.player_id)
+    if not agent:
+        raise PlayerError(f"找不到玩家{request.player_id}的AI代理")
+
+    # 获取决策
+    start_time = time.time()
+    action, amount, thinking = await agent.make_decision(
+        game_state=request.game_state,
+        valid_actions=request.valid_actions,
+        min_bet=request.min_bet,
+        max_bet=request.max_bet
+    )
+    latency_ms = int((time.time() - start_time) * 1000)
+
+    # 输出结构化决策日志（JSONL），用于后续对局数据分析
+    decision_logger.info(json.dumps({
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "player_id": request.player_id,
+        "provider": getattr(agent, "provider", "unknown"),
+        "model": getattr(agent, "model", None) or getattr(agent, "model_name", "unknown"),
+        "action": action,
+        "amount": amount,
+        "latency_ms": latency_ms,
+    }, ensure_ascii=False))
+
+    return DecisionResponse(action=action, amount=amount, thinking=thinking)
 
 @app.delete("/api/agents/{player_id}")
 async def delete_agent(player_id: str):
     """
     删除AI代理。
-    
+
     Args:
         player_id: 玩家ID
     """
-    print(f"📥 收到删除AI代理请求 - 玩家ID: {player_id}")
-    try:
-        if player_id in agents:
-            del agents[player_id]
-            print(f"✅ 代理删除成功 - 玩家ID: {player_id}, 当前代理池大小: {len(agents)}")
-        else:
-            print(f"⚠️ 要删除的代理不存在 - 玩家ID: {player_id}")
-        return {"status": "ok"}
-    except Exception as e:
-        print(f"❌ 删除代理失败 - {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if player_id in agents:
+        del agents[player_id]
+        logger.info("代理删除成功 - 玩家ID: %s, 当前代理池大小: %d", player_id, len(agents))
+    else:
+        logger.warning("要删除的代理不存在 - 玩家ID: %s", player_id)
+    return {"status": "ok"}
 
 @app.delete("/api/agents")
 async def delete_all_agents():
     """
     删除所有AI代理。
-    
+
     Returns:
         删除状态
     """
-    print(f"📥 收到删除所有AI代理请求 - 当前代理数量: {len(agents)}")
-    try:
-        count = len(agents)
-        agents.clear()
-        print(f"✅ 所有代理删除成功 - 删除数量: {count}, 当前代理池大小: {len(agents)}")
-        return {"status": "ok", "message": f"已删除所有{count}个AI代理", "deleted_count": count}
-    except Exception as e:
-        print(f"❌ 删除所有代理失败 - {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    count = len(agents)
+    agents.clear()
+    logger.info("所有代理删除成功 - 删除数量: %d", count)
+    return {"status": "ok", "message": f"已删除所有{count}个AI代理", "deleted_count": count}
 
 @app.get("/api/health")
 async def health_check():
     """健康检查接口"""
-    print(f"📥 收到健康检查请求 - 当前代理池大小: {len(agents)}")
     return {"status": "ok"}
 
 @app.get("/api/agents", response_model=List[AgentInfo])
 async def list_agents() -> List[AgentInfo]:
     """
     获取所有注册的AI代理列表。
-    
+
     Returns:
         List[AgentInfo]: 代理信息列表
     """
-    print(f"📥 收到列出所有AI代理请求 - 当前代理数量: {len(agents)}")
+    logger.info("收到列出所有AI代理请求 - 当前代理数量: %d", len(agents))
     agent_list = []
     for player_id, agent in agents.items():
-        # 使用getattr获取模型名称，支持不同的属性名
-        model = getattr(agent, 'model_name', None) or getattr(agent, 'model', 'unknown')
-        
-        # 从agent实例获取提供商名称
-        provider = agent.__class__.__name__.lower()
-        if provider.endswith('agent'):
-            provider = provider[:-5]  # 移除'agent'后缀
-        if provider == 'llm':
-            provider = 'anthropic'  # 特殊处理LLMAgent
+        model = getattr(agent, 'model', None) or getattr(agent, 'model_name', 'unknown')
 
-        # 如果有特殊类处理，记录
-        if hasattr(agent, 'provider'):
-            provider = agent.provider
-        
-        # 获取用户友好的提供商名称
-        if provider in LLMFactory._reverse_aliases:
-            display_provider = LLMFactory._reverse_aliases[provider]
-            print(f"📝 提供商显示转换: {provider} → {display_provider}")
-            provider = display_provider
-        
-        agent_info = AgentInfo(
+        # 代理实例上存储了提供商标识，直接读取并转换为用户友好名称
+        provider = LLMFactory.display_provider(agent.provider)
+
+        agent_list.append(AgentInfo(
             player_id=agent.player_id,
             name=agent.name,
             provider=provider,
             model=model,
             status="active"
-        )
-        agent_list.append(agent_info)
-        print(f"✅ 代理信息 - 玩家ID: {agent.player_id}, 名称: {agent.name}, 提供商: {provider}, 模型: {model}")
+        ))
 
-    print(f"📤 返回代理列表 - 数量: {len(agent_list)}")
     return agent_list
-
-# 启动时输出信息
-@app.on_event("startup")
-async def startup_event():
-    print("=" * 50)
-    print("🚀 扑克AI服务启动")
-    # 初始化LLM工厂
-    LLMFactory.init()
-    # 获取用户友好的提供商列表
-    providers = LLMFactory.get_user_facing_providers()
-    providers_str = ", ".join(providers)
-    print(f"📌 支持的LLM提供商: {providers_str}")
-    print(f"📌 本地端点: http://localhost:8000")
-    print("=" * 50)
-
-# 关闭时输出信息
-@app.on_event("shutdown")
-async def shutdown_event():
-    print("=" * 50)
-    print("👋 扑克AI服务关闭")
-    print(f"📌 清理 {len(agents)} 个代理实例")
-    agents.clear()
-    print("=" * 50) 

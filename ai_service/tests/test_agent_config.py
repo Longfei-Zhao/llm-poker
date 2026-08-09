@@ -1,167 +1,77 @@
 import pytest
 from unittest.mock import patch
 import os
-from src.config.agent_config import AgentConfig, LLMConfig
+from src.config.agent_config import (
+    PROVIDERS,
+    PROVIDER_ALIASES,
+    REVERSE_ALIASES,
+    get_provider_config,
+    get_default_model,
+    get_api_key,
+    get_api_base,
+    openai_compatible_providers,
+)
 
-@pytest.fixture
-def config():
-    """创建代理配置管理实例"""
+def test_provider_table_completeness():
+    """测试提供商配置表包含所有已知提供商"""
+    for provider in ["anthropic", "openai", "deepseek", "gemini", "aliyun", "xai", "perplexity", "local"]:
+        assert provider in PROVIDERS
+        assert PROVIDERS[provider].default_model
+
+def test_get_provider_config():
+    """测试获取提供商配置"""
+    config = get_provider_config("anthropic")
+    assert config.default_model == "claude-3-7-sonnet-20250219"
+    assert config.api_key_env == "ANTHROPIC_API_KEY"
+
+    with pytest.raises(KeyError):
+        get_provider_config("invalid")
+
+def test_get_default_model():
+    """测试获取默认模型"""
+    assert get_default_model("openai") == "gpt-4o"
+    assert get_default_model("deepseek") == "deepseek-chat"
+    assert get_default_model("invalid") is None
+
+def test_get_api_key():
+    """测试从环境变量读取API密钥"""
     with patch.dict(os.environ, {
         "ANTHROPIC_API_KEY": "test_anthropic_key",
-        "OPENAI_API_KEY": "test_openai_key",
-        "DEEPSEEK_API_KEY": "test_deepseek_key",
-        "GOOGLE_API_KEY": "test_google_key",
-        "LOCAL_LLM_API_BASE": "http://localhost:8000"
+        "DASHSCOPE_API_KEY": "test_aliyun_key",
+        "PPLX_API_KEY": "test_pplx_key",
     }):
-        return AgentConfig()
+        assert get_api_key("anthropic") == "test_anthropic_key"
+        # 阿里云和perplexity使用特殊的环境变量名
+        assert get_api_key("aliyun") == "test_aliyun_key"
+        assert get_api_key("perplexity") == "test_pplx_key"
 
-def test_get_config_success(config):
-    """测试成功获取配置"""
-    # 测试Anthropic配置
-    anthropic_config = config.get_config("anthropic")
-    assert isinstance(anthropic_config, LLMConfig)
-    assert anthropic_config.api_key == "test_anthropic_key"
-    assert anthropic_config.model == "claude-3-sonnet-20240229"
-    
-    # 测试OpenAI配置
-    openai_config = config.get_config("openai")
-    assert isinstance(openai_config, LLMConfig)
-    assert openai_config.api_key == "test_openai_key"
-    assert openai_config.model == "gpt-4"
-    
-    # 测试DeepSeek配置
-    deepseek_config = config.get_config("deepseek")
-    assert isinstance(deepseek_config, LLMConfig)
-    assert deepseek_config.api_key == "test_deepseek_key"
-    assert deepseek_config.api_base == "https://api.deepseek.com/v1"
-    assert deepseek_config.model == "deepseek-chat"
-    
-    # 测试Gemini配置
-    gemini_config = config.get_config("gemini")
-    assert isinstance(gemini_config, LLMConfig)
-    assert gemini_config.api_key == "test_google_key"
-    assert gemini_config.model == "gemini-pro"
-    
-    # 测试Local LLM配置
-    local_config = config.get_config("local")
-    assert isinstance(local_config, LLMConfig)
-    assert local_config.api_base == "http://localhost:8000"
-    assert local_config.model == "Qwen/Qwen2.5-32B-Instruct-AWQ"
+    # local不需要API密钥
+    assert get_api_key("local") is None
+    # 未知提供商返回None
+    assert get_api_key("invalid") is None
 
-def test_get_config_invalid_provider(config):
-    """测试获取无效提供商的配置"""
-    with pytest.raises(ValueError) as exc_info:
-        config.get_config("invalid")
-    assert "不支持的LLM提供商" in str(exc_info.value)
-
-def test_get_config_missing_api_key():
-    """测试缺少API密钥的情况"""
+def test_get_api_key_missing():
+    """测试环境变量缺失时返回空字符串"""
     with patch.dict(os.environ, clear=True):
-        config = AgentConfig()
-        
-        # 测试Anthropic
-        with pytest.raises(ValueError) as exc_info:
-            config.get_config("anthropic")
-        assert "未配置anthropic的API密钥" in str(exc_info.value)
-        
-        # 测试OpenAI
-        with pytest.raises(ValueError) as exc_info:
-            config.get_config("openai")
-        assert "未配置openai的API密钥" in str(exc_info.value)
-        
-        # 测试DeepSeek
-        with pytest.raises(ValueError) as exc_info:
-            config.get_config("deepseek")
-        assert "未配置deepseek的API密钥" in str(exc_info.value)
-        
-        # 测试Gemini
-        with pytest.raises(ValueError) as exc_info:
-            config.get_config("gemini")
-        assert "未配置gemini的API密钥" in str(exc_info.value)
-        
-        # 测试Local LLM（不需要API密钥）
-        local_config = config.get_config("local")
-        assert isinstance(local_config, LLMConfig)
+        assert get_api_key("anthropic") == ""
 
-def test_update_config(config):
-    """测试更新配置"""
-    # 更新OpenAI配置
-    config.update_config(
-        "openai",
-        api_key="new_key",
-        model="gpt-4-turbo",
-        temperature=0.8,
-        max_tokens=200
-    )
-    
-    openai_config = config.get_config("openai")
-    assert openai_config.api_key == "new_key"
-    assert openai_config.model == "gpt-4-turbo"
-    assert openai_config.temperature == 0.8
-    assert openai_config.max_tokens == 200
-
-def test_update_config_invalid_provider(config):
-    """测试更新无效提供商的配置"""
-    with pytest.raises(ValueError) as exc_info:
-        config.update_config("invalid", api_key="new_key")
-    assert "不支持的LLM提供商" in str(exc_info.value)
-
-def test_list_providers(config):
-    """测试获取提供商列表"""
-    providers = config.list_providers()
-    assert isinstance(providers, list)
-    assert len(providers) == 5
-    assert "anthropic" in providers
-    assert "openai" in providers
-    assert "deepseek" in providers
-    assert "gemini" in providers
-    assert "local" in providers
-
-def test_validate_config(config):
-    """测试验证配置"""
-    # 测试有效配置
-    assert config.validate_config("anthropic") is True
-    assert config.validate_config("openai") is True
-    assert config.validate_config("deepseek") is True
-    assert config.validate_config("gemini") is True
-    assert config.validate_config("local") is True
-    
-    # 测试无效配置
-    assert config.validate_config("invalid") is False
-    
-    # 测试缺少API密钥的配置
+def test_get_api_base():
+    """测试API基础URL及环境变量覆盖"""
     with patch.dict(os.environ, clear=True):
-        config = AgentConfig()
-        assert config.validate_config("anthropic") is False
-        assert config.validate_config("openai") is False
-        assert config.validate_config("deepseek") is False
-        assert config.validate_config("gemini") is False
-        assert config.validate_config("local") is True  # 本地LLM不需要API密钥
+        assert get_api_base("deepseek") == "https://api.deepseek.com/v1"
+        assert get_api_base("openai") == "https://api.openai.com/v1"
+        # anthropic不使用OpenAI兼容URL
+        assert get_api_base("anthropic") is None
 
-def test_llm_config_validation():
-    """测试LLM配置验证"""
-    # 测试有效配置
-    config = LLMConfig(
-        api_key="test_key",
-        model="test_model",
-        temperature=0.7,
-        max_tokens=100
-    )
-    assert config.temperature == 0.7
-    assert config.max_tokens == 100
-    
-    # 测试无效的temperature
-    with pytest.raises(ValueError):
-        LLMConfig(
-            api_key="test_key",
-            model="test_model",
-            temperature=1.5
-        )
-    
-    # 测试无效的max_tokens
-    with pytest.raises(ValueError):
-        LLMConfig(
-            api_key="test_key",
-            model="test_model",
-            max_tokens=0
-        ) 
+    with patch.dict(os.environ, {"DEEPSEEK_API_BASE": "http://proxy.example.com/v1"}):
+        assert get_api_base("deepseek") == "http://proxy.example.com/v1"
+
+def test_openai_compatible_providers():
+    """测试OpenAI兼容提供商列表"""
+    providers = openai_compatible_providers()
+    assert set(providers) == {"openai", "deepseek", "aliyun", "xai", "perplexity"}
+
+def test_aliases():
+    """测试别名映射"""
+    assert PROVIDER_ALIASES["google"] == "gemini"
+    assert REVERSE_ALIASES["gemini"] == "google"

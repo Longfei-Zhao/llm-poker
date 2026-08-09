@@ -1,104 +1,98 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import os
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-class LLMConfig(BaseModel):
-    """LLM配置类"""
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
-    model: str
-    temperature: float = Field(default=0.7, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=100, gt=0)
+# 提供商配置表——所有默认模型、API密钥环境变量、API基础URL的唯一来源。
+# llm_factory、各代理类和main.py都从这里读取，避免多处维护。
 
-class AgentConfig:
-    """代理配置管理类"""
-    
-    def __init__(self):
-        """初始化代理配置"""
-        self.configs: Dict[str, LLMConfig] = {
-            "anthropic": LLMConfig(
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
-                model="claude-3-7-sonnet-20250219"
-            ),
-            "openai": LLMConfig(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                model="gpt-4"
-            ),
-            "deepseek": LLMConfig(
-                api_key=os.getenv("DEEPSEEK_API_KEY"),
-                api_base=os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
-                model="deepseek-chat"
-            ),
-            "gemini": LLMConfig(
-                api_key=os.getenv("GOOGLE_API_KEY"),
-                model="gemini-pro"
-            ),
-            "local": LLMConfig(
-                api_base=os.getenv("LOCAL_LLM_API_BASE", "http://localhost:8000"),
-                model="Qwen/Qwen2.5-32B-Instruct-AWQ"
-            )
-        }
-        
-    def get_config(self, provider: str) -> LLMConfig:
-        """获取指定提供商的配置
-        
-        Args:
-            provider: LLM提供商名称
-            
-        Returns:
-            LLMConfig: LLM配置对象
-            
-        Raises:
-            ValueError: 如果提供商不存在或配置无效
-        """
-        if provider not in self.configs:
-            raise ValueError(f"不支持的LLM提供商: {provider}")
-            
-        config = self.configs[provider]
-        
-        # 验证API密钥（本地LLM除外）
-        if provider != "local" and not config.api_key:
-            raise ValueError(f"未配置{provider}的API密钥")
-            
-        return config
-        
-    def update_config(self, provider: str, **kwargs) -> None:
-        """更新指定提供商的配置
-        
-        Args:
-            provider: LLM提供商名称
-            **kwargs: 要更新的配置项
-            
-        Raises:
-            ValueError: 如果提供商不存在
-        """
-        if provider not in self.configs:
-            raise ValueError(f"不支持的LLM提供商: {provider}")
-            
-        config = self.configs[provider]
-        for key, value in kwargs.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-                
-    def list_providers(self) -> list[str]:
-        """获取所有支持的提供商列表
-        
-        Returns:
-            list[str]: 提供商名称列表
-        """
-        return list(self.configs.keys())
-        
-    def validate_config(self, provider: str) -> bool:
-        """验证指定提供商的配置是否有效
-        
-        Args:
-            provider: LLM提供商名称
-            
-        Returns:
-            bool: 配置是否有效
-        """
-        try:
-            self.get_config(provider)
-            return True
-        except ValueError:
-            return False 
+class ProviderConfig(BaseModel):
+    """单个LLM提供商的静态配置"""
+    default_model: str
+    api_key_env: Optional[str] = None  # 为None表示不需要API密钥（如本地模型）
+    api_base: Optional[str] = None  # 仅OpenAI兼容提供商需要
+    openai_compatible: bool = False
+
+# 提供商配置表
+PROVIDERS: Dict[str, ProviderConfig] = {
+    "anthropic": ProviderConfig(
+        default_model="claude-3-7-sonnet-20250219",
+        api_key_env="ANTHROPIC_API_KEY",
+    ),
+    "openai": ProviderConfig(
+        default_model="gpt-4o",
+        api_key_env="OPENAI_API_KEY",
+        api_base="https://api.openai.com/v1",
+        openai_compatible=True,
+    ),
+    "deepseek": ProviderConfig(
+        default_model="deepseek-chat",
+        api_key_env="DEEPSEEK_API_KEY",
+        api_base="https://api.deepseek.com/v1",
+        openai_compatible=True,
+    ),
+    "gemini": ProviderConfig(
+        default_model="gemini-2.0-pro-exp-02-05",
+        api_key_env="GEMINI_API_KEY",
+    ),
+    "aliyun": ProviderConfig(
+        default_model="qwen-plus",
+        api_key_env="DASHSCOPE_API_KEY",
+        # 阿里云通义千问的OpenAI兼容模式API
+        api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        openai_compatible=True,
+    ),
+    "xai": ProviderConfig(
+        default_model="grok-2",
+        api_key_env="XAI_API_KEY",
+        api_base="https://api.x.ai/v1",
+        openai_compatible=True,
+    ),
+    "perplexity": ProviderConfig(
+        default_model="sonar",
+        api_key_env="PPLX_API_KEY",
+        api_base="https://api.perplexity.ai",
+        openai_compatible=True,
+    ),
+    "local": ProviderConfig(
+        default_model="Qwen/Qwen2.5-32B-Instruct-AWQ",
+        api_key_env=None,
+    ),
+}
+
+# 提供商别名映射（支持多种名称指向同一提供商）
+PROVIDER_ALIASES: Dict[str, str] = {
+    "google": "gemini",  # Google的Gemini模型
+}
+
+# 反向别名映射（用于显示）
+REVERSE_ALIASES: Dict[str, str] = {
+    "gemini": "google",  # 将内部的gemini显示为google
+}
+
+def get_provider_config(provider: str) -> ProviderConfig:
+    """获取提供商配置，不存在时抛出KeyError"""
+    return PROVIDERS[provider]
+
+def get_default_model(provider: str) -> Optional[str]:
+    """获取提供商的默认模型名称"""
+    config = PROVIDERS.get(provider)
+    return config.default_model if config else None
+
+def get_api_key(provider: str) -> Optional[str]:
+    """从环境变量读取提供商的API密钥；不需要密钥的提供商返回None"""
+    config = PROVIDERS.get(provider)
+    if config is None or config.api_key_env is None:
+        return None
+    return os.getenv(config.api_key_env, "")
+
+def get_api_base(provider: str) -> Optional[str]:
+    """获取提供商的API基础URL，环境变量{PROVIDER}_API_BASE可覆盖默认值"""
+    custom_base = os.getenv(f"{provider.upper()}_API_BASE")
+    if custom_base:
+        return custom_base
+    config = PROVIDERS.get(provider)
+    return config.api_base if config else None
+
+def openai_compatible_providers() -> List[str]:
+    """获取所有OpenAI兼容的提供商名称"""
+    return [name for name, cfg in PROVIDERS.items() if cfg.openai_compatible]

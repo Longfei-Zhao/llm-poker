@@ -1,31 +1,33 @@
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-import os
-import json
+from unittest.mock import patch, MagicMock
+
+import src.agents.local_llm_agent as local_llm_module
 from src.agents.local_llm_agent import LocalLLMAgent
+from src.exceptions import ConfigError
 
 @pytest.fixture
 def agent():
-    """创建Local LLM代理实例"""
-    with patch.dict(os.environ, {"LOCAL_LLM_API_BASE": "http://localhost:8000"}):
-        return LocalLLMAgent("test_player", "Test Player")
+    """创建Local LLM代理实例（跳过transformers依赖检查，不加载模型）"""
+    with patch.object(local_llm_module, "has_transformers", True):
+        return LocalLLMAgent("test_player", "Test Player", model="test-model")
 
 @pytest.fixture
 def game_state():
     """创建测试用的游戏状态"""
     return {
-        "state": "preflop",
+        "stage": "preflop",
         "pot": 30,
         "currentBet": 20,
+        "currentPlayerId": "test_player",
         "communityCards": [],
         "players": [
             {
                 "id": "test_player",
                 "name": "Test Player",
-                "cards": ["AS", "KS"],
+                "cards": ["As", "Ks"],
                 "chips": 1000,
                 "bet": 0,
-                "position": 0,
+                "position": 1,
                 "isActive": True
             },
             {
@@ -33,148 +35,106 @@ def game_state():
                 "name": "Player 2",
                 "chips": 900,
                 "bet": 20,
-                "position": 1,
+                "position": 2,
                 "isActive": True
             }
         ]
     }
 
+def test_init_without_transformers():
+    """测试transformers未安装时给出明确错误"""
+    with patch.object(local_llm_module, "has_transformers", False):
+        with pytest.raises(ConfigError) as exc_info:
+            LocalLLMAgent("test_player", "Test Player")
+        assert "torch" in str(exc_info.value)
+
+def test_factory_importable_without_transformers():
+    """测试工厂在没有transformers时仍可导入并注册local提供商"""
+    from src.agents.llm_factory import LLMFactory
+    assert "local" in LLMFactory.supported_providers()
+
 @pytest.mark.asyncio
-async def test_make_decision_success(agent, game_state):
-    """测试成功做出决策"""
-    # 模拟API响应
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"action": "raise", "amount": 60}'
-                }
-            }
-        ]
-    }
-    
-    # 模拟httpx客户端
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
-    agent.client = mock_client
-    
-    # 调用决策方法
-    decision = await agent.make_decision(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
-    )
-    
-    # 验证结果
-    assert decision["action"] == "raise"
-    assert decision["amount"] == 60
-    
-    # 验证API调用
-    mock_client.post.assert_called_once()
-    call_args = mock_client.post.call_args
-    assert call_args[0][0] == "http://localhost:8000/v1/chat/completions"
-    assert call_args[1]["json"]["model"] == "Qwen/Qwen2.5-32B-Instruct-AWQ"
-    
+async def test_make_decision_returns_three_tuple(agent, game_state):
+    """测试make_decision返回3元组 (action, amount, thinking)"""
+    agent._is_model_loaded = True
+    with patch.object(agent, "_generate_response",
+                      return_value='{"action": "raise", "amount": 60}'):
+        result = await agent.make_decision(
+            game_state, ["fold", "call", "raise"], 40, 1000
+        )
+
+    assert len(result) == 3
+    action, amount, thinking = result
+    assert action == "raise"
+    assert amount == 60
+    assert isinstance(thinking, str)
+
 @pytest.mark.asyncio
 async def test_make_decision_invalid_action(agent, game_state):
-    """测试处理无效动作"""
-    # 模拟API返回无效动作
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"action": "invalid"}'
-                }
-            }
-        ]
-    }
-    
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
-    agent.client = mock_client
-    
-    # 调用决策方法
-    decision = await agent.make_decision(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
-    )
-    
-    # 验证结果（应该默认fold）
-    assert decision["action"] == "fold"
+    """测试无效动作时回退为默认动作"""
+    agent._is_model_loaded = True
+    with patch.object(agent, "_generate_response",
+                      return_value='{"action": "invalid"}'):
+        action, amount, thinking = await agent.make_decision(
+            game_state, ["fold", "call", "raise"], 40, 1000
+        )
+
+    # 没有check时默认call
+    assert action == "call"
+    assert amount is None
 
 @pytest.mark.asyncio
-async def test_make_decision_api_error(agent, game_state):
-    """测试API错误处理"""
-    # 模拟API错误
-    mock_client = AsyncMock()
-    mock_client.post.side_effect = Exception("API Error")
-    agent.client = mock_client
-    
-    # 调用决策方法
-    decision = await agent.make_decision(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
+async def test_make_decision_inference_error(agent, game_state):
+    """测试推理失败时返回默认动作的3元组"""
+    agent._is_model_loaded = True
+    with patch.object(agent, "_generate_response", side_effect=Exception("模型错误")):
+        action, amount, thinking = await agent.make_decision(
+            game_state, ["fold", "check", "call"], 40, 1000
+        )
+
+    # check优先于fold
+    assert action == "check"
+    assert amount is None
+    assert "失败" in thinking
+
+def test_parse_decision_json(agent):
+    """测试JSON决策解析"""
+    action, amount = agent._parse_decision(
+        '决策如下：{"action": "raise", "amount": 100}',
+        ["fold", "call", "raise"], 40, 1000
     )
-    
-    # 验证结果（应该默认fold）
-    assert decision["action"] == "fold"
+    assert action == "raise"
+    assert amount == 100
 
-def test_format_game_state(agent, game_state):
-    """测试游戏状态格式化"""
-    formatted_state = agent._format_game_state(game_state)
-    
-    # 验证格式化结果包含关键信息
-    assert "游戏阶段: preflop" in formatted_state
-    assert "底池: 30" in formatted_state
-    assert "当前最大下注: 20" in formatted_state
-    assert "手牌: AS, KS" in formatted_state
-    assert "Player 2" in formatted_state
-
-def test_build_prompt(agent, game_state):
-    """测试提示词构建"""
-    prompt = agent._build_prompt(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
+def test_parse_decision_clamps_amount(agent):
+    """测试金额钳制"""
+    action, amount = agent._parse_decision(
+        '{"action": "raise", "amount": 5}',
+        ["fold", "call", "raise"], 40, 1000
     )
-    
-    # 验证提示词包含必要信息
-    assert "游戏阶段: preflop" in prompt
-    assert "你可以采取的动作" in prompt
-    assert "fold, call, raise" in prompt
-    assert "最小: 40" in prompt
-    assert "最大: 1000" in prompt
-    assert "必须是一个JSON字符串" in prompt
+    assert action == "raise"
+    assert amount == 40
 
-def test_format_game_state_player_not_found(agent):
-    """测试找不到玩家的情况"""
-    invalid_state = {
-        "state": "preflop",
-        "pot": 30,
-        "currentBet": 20,
-        "communityCards": [],
-        "players": [
-            {
-                "id": "other_player",
-                "name": "Other Player",
-                "chips": 1000,
-                "bet": 0,
-                "position": 0,
-                "isActive": True
-            }
-        ]
-    }
-    
-    with pytest.raises(ValueError) as exc_info:
-        agent._format_game_state(invalid_state)
-    assert "在游戏状态中找不到当前玩家" in str(exc_info.value) 
+def test_parse_text_decision(agent):
+    """测试自由文本决策解析"""
+    action, amount = agent._parse_text_decision(
+        "我决定call跟注", ["fold", "call", "raise"], 40, 1000
+    )
+    assert action == "call"
+    assert amount is None
+
+def test_parse_text_decision_fallback(agent):
+    """测试文本中无动作关键词时使用默认动作"""
+    action, amount = agent._parse_text_decision(
+        "无法判断", ["fold", "check"], 40, 1000
+    )
+    assert action == "check"
+    assert amount is None
+
+def test_no_duplicate_state_fields(agent):
+    """测试状态字段继承自BaseAgent（不再重复声明）"""
+    agent.update_state(["As", "Ks"], ["7h"], "BTN", 500)
+    assert agent.hand_cards == ["As", "Ks"]
+    assert agent.community_cards == ["7h"]
+    assert agent.position == "BTN"
+    assert agent.chips == 500

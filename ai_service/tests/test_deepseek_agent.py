@@ -1,199 +1,82 @@
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-import os
-import json
+from unittest.mock import AsyncMock, MagicMock, patch
 from src.agents.openai_compatible_agent import OpenAICompatibleAgent
+from src.config.agent_config import get_default_model
 
 @pytest.fixture
 def agent():
     """创建DeepSeek代理实例"""
-    with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test_key"}):
-        return OpenAICompatibleAgent(
-            player_id="test_player", 
-            name="Test Player", 
-            api_key="test_key", 
-            provider="deepseek",
-            model="deepseek-chat"
+    return OpenAICompatibleAgent(
+        player_id="test_player",
+        name="Test Player",
+        api_key="test_key",
+        provider="deepseek",
+        model="deepseek-chat"
+    )
+
+def test_deepseek_api_base(agent):
+    """测试DeepSeek使用配置表中的API基础URL"""
+    assert agent.api_base == "https://api.deepseek.com/v1"
+    assert agent.provider == "deepseek"
+
+def test_deepseek_default_model():
+    """测试不指定模型时使用配置表默认模型"""
+    agent = OpenAICompatibleAgent(
+        player_id="test_player",
+        name="Test Player",
+        api_key="test_key",
+        provider="deepseek"
+    )
+    assert agent.model == get_default_model("deepseek")
+
+@pytest.mark.asyncio
+async def test_make_decision_success(agent, full_game_state):
+    """测试成功做出决策"""
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content='{"thinking": "跟注看翻牌", "action": "call"}'))
+    ]
+
+    with patch.object(agent.client.chat.completions, "create", new_callable=AsyncMock) as mock_create:
+        mock_create.return_value = mock_response
+
+        action, amount, thinking = await agent.make_decision(
+            full_game_state, ["fold", "call", "raise"], 40, 1000
         )
 
-@pytest.fixture
-def game_state():
-    """创建测试用的游戏状态"""
-    return {
-        "state": "preflop",
-        "pot": 30,
-        "currentBet": 20,
-        "communityCards": [],
-        "players": [
-            {
-                "id": "test_player",
-                "name": "Test Player",
-                "cards": ["AS", "KS"],
-                "chips": 1000,
-                "bet": 0,
-                "position": 0,
-                "isActive": True
-            },
-            {
-                "id": "player2",
-                "name": "Player 2",
-                "chips": 900,
-                "bet": 20,
-                "position": 1,
-                "isActive": True
-            }
-        ]
-    }
+    assert action == "call"
+    assert amount is None
+    assert thinking == "跟注看翻牌"
 
 @pytest.mark.asyncio
-async def test_make_decision_success(agent, game_state):
-    """测试成功做出决策"""
-    # 模拟API响应
+async def test_reasoner_model_uses_special_parser(full_game_state):
+    """测试deepseek-reasoner模型走推理专用解析逻辑"""
+    agent = OpenAICompatibleAgent(
+        player_id="test_player",
+        name="Test Player",
+        api_key="test_key",
+        provider="deepseek",
+        model="deepseek-reasoner"
+    )
+
+    reasoner_output = """分析当前局面：我的手牌较强，位置有利。
+对手的下注模式显示其范围偏弱。
+
+最终决策：raise 80"""
+
     mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"action": "raise", "amount": 60}'
-                }
-            }
-        ]
-    }
-    
-    # 模拟httpx客户端
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
-    agent.client = mock_client
-    
-    # 调用决策方法
-    decision = await agent.make_decision(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
-    )
-    
-    # 验证结果
-    assert decision["action"] == "raise"
-    assert decision["amount"] == 60
-    
-    # 验证API调用
-    mock_client.post.assert_called_once()
-    call_args = mock_client.post.call_args
-    assert call_args[0][0] == "https://api.deepseek.com/v1/chat/completions"
-    assert call_args[1]["headers"]["Authorization"] == "Bearer test_key"
-    
-@pytest.mark.asyncio
-async def test_make_decision_invalid_action(agent, game_state):
-    """测试处理无效动作"""
-    # 模拟API返回无效动作
-    mock_response = MagicMock()
-    mock_response.raise_for_status = MagicMock()
-    mock_response.json.return_value = {
-        "choices": [
-            {
-                "message": {
-                    "content": '{"action": "invalid"}'
-                }
-            }
-        ]
-    }
-    
-    mock_client = AsyncMock()
-    mock_client.post.return_value = mock_response
-    agent.client = mock_client
-    
-    # 调用决策方法
-    decision = await agent.make_decision(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
-    )
-    
-    # 验证结果（应该默认fold）
-    assert decision["action"] == "fold"
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=reasoner_output))
+    ]
 
-@pytest.mark.asyncio
-async def test_make_decision_api_error(agent, game_state):
-    """测试API错误处理"""
-    # 模拟API错误
-    mock_client = AsyncMock()
-    mock_client.post.side_effect = Exception("API Error")
-    agent.client = mock_client
-    
-    # 调用决策方法
-    decision = await agent.make_decision(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
-    )
-    
-    # 验证结果（应该默认fold）
-    assert decision["action"] == "fold"
+    with patch.object(agent.client.chat.completions, "create", new_callable=AsyncMock) as mock_create:
+        mock_create.return_value = mock_response
 
-def test_format_game_state(agent, game_state):
-    """测试游戏状态格式化"""
-    formatted_state = agent._format_game_state(game_state)
-    
-    # 验证格式化结果包含关键信息
-    assert "游戏阶段: preflop" in formatted_state
-    assert "底池: 30" in formatted_state
-    assert "当前最大下注: 20" in formatted_state
-    assert "手牌: AS, KS" in formatted_state
-    assert "Player 2" in formatted_state
+        action, amount, thinking = await agent.make_decision(
+            full_game_state, ["fold", "call", "raise"], 40, 1000
+        )
 
-def test_build_prompt(agent, game_state):
-    """测试提示词构建"""
-    prompt = agent._build_prompt(
-        game_state,
-        ["fold", "call", "raise"],
-        40,
-        1000
-    )
-    
-    # 验证提示词包含必要信息
-    assert "游戏阶段: preflop" in prompt
-    assert "你可以采取的动作" in prompt
-    assert "fold, call, raise" in prompt
-    assert "最小: 40" in prompt
-    assert "最大: 1000" in prompt
-    assert "必须是一个JSON字符串" in prompt
-
-def test_init_missing_api_key():
-    """测试缺少API密钥的情况"""
-    with patch.dict(os.environ, clear=True):
-        with pytest.raises(ValueError) as exc_info:
-            OpenAICompatibleAgent(
-                player_id="test_player", 
-                name="Test Player", 
-                api_key="test_key", 
-                provider="deepseek",
-                model="deepseek-chat"
-            )
-        assert "未配置deepseek的API密钥" in str(exc_info.value)
-
-def test_format_game_state_player_not_found(agent):
-    """测试找不到玩家的情况"""
-    invalid_state = {
-        "state": "preflop",
-        "pot": 30,
-        "currentBet": 20,
-        "communityCards": [],
-        "players": [
-            {
-                "id": "other_player",
-                "name": "Other Player",
-                "chips": 1000,
-                "bet": 0,
-                "position": 0,
-                "isActive": True
-            }
-        ]
-    }
-    
-    with pytest.raises(ValueError) as exc_info:
-        agent._format_game_state(invalid_state)
-    assert "在游戏状态中找不到当前玩家" in str(exc_info.value) 
+    assert action == "raise"
+    assert amount == 80
+    # 推理模型保留完整响应作为思考过程
+    assert thinking == reasoner_output
