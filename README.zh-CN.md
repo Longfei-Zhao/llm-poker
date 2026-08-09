@@ -13,6 +13,8 @@
 
 *一手 4-bet 大底池进行中：右侧思考面板展示模型的原始推理——小盲位拿着 KK 的 Qwen 正在把 UTG 4-bet 玩家的范围估计为"AA、KK、QQ 或 AK"。*
 
+**[演示视频（Bilibili）](https://www.bilibili.com/video/BV1m3QUYnEuK/)** ——《大模型终极德州之战 (1) —— 我来给AI攒个德州局》
+
 ## 系统架构
 
 ```mermaid

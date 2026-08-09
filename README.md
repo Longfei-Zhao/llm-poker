@@ -13,6 +13,8 @@ Benchmarks measure what a model knows. Poker measures how it decides: incomplete
 
 *A live hand mid-4-bet-war: the 思考 (thinking) panel on the right streams each model's raw reasoning — Qwen, holding KK in the small blind, is estimating the UTG 4-bettor's range at "AA, KK, QQ or AK".*
 
+**[Demo video (Bilibili, in Chinese)](https://www.bilibili.com/video/BV1m3QUYnEuK/)** — 大模型终极德州之战 (1): a narrated walkthrough of the system in action.
+
 ## Architecture
 
 ```mermaid
