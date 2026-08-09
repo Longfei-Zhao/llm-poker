@@ -1,30 +1,37 @@
 # 大模型德州扑克服务启动脚本
+# 启动 AI 服务 (:8000) 与后端 (:3000)；前端需另开终端运行: cd frontend; flutter run -d chrome
 
 Write-Host "正在启动德州扑克游戏服务..." -ForegroundColor Green
 
-# 停止可能已运行的Node进程
-Write-Host "检查并清理现有进程..." -ForegroundColor Yellow
-$nodeProcesses = Get-Process | Where-Object { $_.ProcessName -eq "node" }
-if ($nodeProcesses) {
-    Write-Host "  发现运行中的Node进程，尝试停止..." -ForegroundColor Yellow
-    $nodeProcesses | ForEach-Object { 
+# 只清理占用本项目端口的进程，不影响其他 Node 应用
+Write-Host "检查端口占用..." -ForegroundColor Yellow
+foreach ($port in 3000, 8000) {
+    $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $conns) {
         try {
-            $_.Kill()
-            Write-Host "  已停止进程: $($_.Id)" -ForegroundColor Yellow
+            Stop-Process -Id $conn.OwningProcess -Force -ErrorAction Stop
+            Write-Host "  已停止占用端口 $port 的进程 (PID: $($conn.OwningProcess))" -ForegroundColor Yellow
         } catch {
-            Write-Host "  无法停止进程 $($_.Id): $_" -ForegroundColor Red
+            Write-Host "  无法停止占用端口 $port 的进程: $_" -ForegroundColor Red
         }
     }
+}
+
+# 检查 AI 服务虚拟环境
+$venvPython = Join-Path $PWD "ai_service\venv\Scripts\python.exe"
+if (-not (Test-Path $venvPython)) {
+    Write-Host "未找到 ai_service\venv，请先创建虚拟环境:" -ForegroundColor Red
+    Write-Host "  cd ai_service; python -m venv venv; venv\Scripts\pip install -r requirements.txt" -ForegroundColor Red
+    exit 1
 }
 
 # 启动AI服务
 Write-Host "`n启动AI服务..." -ForegroundColor Cyan
 $aiServiceJob = Start-Job -ScriptBlock {
     Set-Location $using:PWD\ai_service
-    & "$using:PWD\ai_service\venv\Scripts\python.exe" -m uvicorn src.main:app --host 0.0.0.0 --port 8000
+    & $using:venvPython -m uvicorn src.main:app --host 0.0.0.0 --port 8000
 }
 Write-Host "  AI服务启动中 (Job ID: $($aiServiceJob.Id))" -ForegroundColor Cyan
-Write-Host "  等待AI服务启动..." -ForegroundColor Cyan
 Start-Sleep -Seconds 5
 
 # 启动后端服务
@@ -34,54 +41,42 @@ $backendJob = Start-Job -ScriptBlock {
     node src/index.js
 }
 Write-Host "  后端服务启动中 (Job ID: $($backendJob.Id))" -ForegroundColor Cyan
-Write-Host "  等待后端服务启动..." -ForegroundColor Cyan
 Start-Sleep -Seconds 3
 
 # 检查服务是否正常运行
 Write-Host "`n检查服务状态..." -ForegroundColor Yellow
 try {
-    $backendHealth = Invoke-RestMethod -Uri "http://localhost:3000/api/health" -Method Get -ErrorAction Stop
-    Write-Host "  后端服务状态: " -NoNewline -ForegroundColor Yellow
-    Write-Host "正常运行" -ForegroundColor Green
+    Invoke-RestMethod -Uri "http://localhost:3000/api/health" -Method Get -ErrorAction Stop | Out-Null
+    Write-Host "  后端服务状态: 正常运行" -ForegroundColor Green
 } catch {
-    Write-Host "  后端服务状态: " -NoNewline -ForegroundColor Yellow
-    Write-Host "无法连接" -ForegroundColor Red
-    Write-Host "  错误: $_" -ForegroundColor Red
+    Write-Host "  后端服务状态: 无法连接 ($_)" -ForegroundColor Red
 }
-
 try {
-    $aiHealth = Invoke-RestMethod -Uri "http://localhost:8000/api/health" -Method Get -ErrorAction Stop
-    Write-Host "  AI服务状态: " -NoNewline -ForegroundColor Yellow
-    Write-Host "正常运行" -ForegroundColor Green
+    Invoke-RestMethod -Uri "http://localhost:8000/api/health" -Method Get -ErrorAction Stop | Out-Null
+    Write-Host "  AI服务状态: 正常运行" -ForegroundColor Green
 } catch {
-    Write-Host "  AI服务状态: " -NoNewline -ForegroundColor Yellow
-    Write-Host "无法连接" -ForegroundColor Red
-    Write-Host "  错误: $_" -ForegroundColor Red
+    Write-Host "  AI服务状态: 无法连接 ($_)" -ForegroundColor Red
 }
 
-Write-Host "`n所有服务已启动，正在显示日志输出..." -ForegroundColor Green
+Write-Host "`n后端与AI服务已启动。前端请另开终端运行:" -ForegroundColor Green
+Write-Host "  cd frontend; flutter run -d chrome" -ForegroundColor Green
 Write-Host "按Ctrl+C停止所有服务`n" -ForegroundColor Red
 
 # 显示服务日志
 try {
-    # 循环显示服务日志，直到用户按Ctrl+C
     while ($true) {
         $aiServiceOutput = Receive-Job -Job $aiServiceJob
         if ($aiServiceOutput) {
             Write-Host "AI服务: $aiServiceOutput" -ForegroundColor Magenta
         }
-        
         $backendOutput = Receive-Job -Job $backendJob
         if ($backendOutput) {
             Write-Host "后端服务: $backendOutput" -ForegroundColor Cyan
         }
-        
         Start-Sleep -Milliseconds 500
     }
 } finally {
-    # 清理作业
-    Remove-Job -Job $aiServiceJob -Force
-    Remove-Job -Job $backendJob -Force
-    
+    Stop-Job -Job $aiServiceJob, $backendJob -ErrorAction SilentlyContinue
+    Remove-Job -Job $aiServiceJob, $backendJob -Force
     Write-Host "`n服务已停止" -ForegroundColor Red
-} 
+}
