@@ -32,14 +32,14 @@ class PokerCard {
     this.faceUp = true,
   });
 
-  // 从字符串创建扑克牌，例如 "AS" 表示黑桃A
+  // 从字符串创建扑克牌，例如 "AS" 表示黑桃A，"10H"/"TH" 均表示红心10
   factory PokerCard.fromString(String code) {
-    if (code.length != 2) {
-      throw ArgumentError('卡牌代码必须是两个字符');
+    if (code.length != 2 && code.length != 3) {
+      throw ArgumentError('无效的卡牌代码: $code');
     }
 
-    final rankChar = code[0].toUpperCase();
-    final suitChar = code[1].toUpperCase();
+    final rankChar = code.substring(0, code.length - 1).toUpperCase();
+    final suitChar = code[code.length - 1].toUpperCase();
 
     CardRank rank;
     switch (rankChar) {
@@ -171,6 +171,10 @@ class PokerCard {
 
     return rankStr + suitStr;
   }
+
+  // 序列化时使用短字符串表示（与fromString互逆）
+  @override
+  String toString() => toShortString();
 
   // 获取花色符号
   String get suitSymbol {

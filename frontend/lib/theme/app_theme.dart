@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static ThemeData get darkTheme {
+  // 浅色主题（配色为浅色系，brightness需与之一致）
+  static ThemeData get lightTheme {
     return ThemeData(
       brightness: Brightness.light,
       primaryColor: Color(0xFF1B5E20), // 深绿色

@@ -20,7 +20,7 @@ class PlayerView extends StatelessWidget {
   final Function(Player)? onTap; // 添加点击事件处理
   
   const PlayerView({
-    Key? key,
+    super.key,
     required this.player,
     this.isCurrentPlayer = false,
     this.isShowdown = false,
@@ -28,7 +28,7 @@ class PlayerView extends StatelessWidget {
     this.isDealer = false, // 默认不是庄家
     this.direction = PlayerDirection.bottom, // 默认为底部方向
     this.onTap,
-  }) : super(key: key);
+  });
   
   @override
   Widget build(BuildContext context) {
@@ -41,7 +41,6 @@ class PlayerView extends StatelessWidget {
       case PlayerDirection.top:
         return _buildVerticalLayout(context, isTop: true);
       case PlayerDirection.bottom:
-      default:
         return _buildVerticalLayout(context, isTop: false);
     }
   }
@@ -139,7 +138,7 @@ class PlayerView extends StatelessWidget {
               boxShadow: [
                 BoxShadow(
                   color: highlight 
-                      ? Colors.amber.withOpacity(0.5) 
+                      ? Colors.amber.withValues(alpha: 0.5) 
                       : Colors.black26,
                   spreadRadius: highlight ? 2 : 1,
                   blurRadius: highlight ? 8 : 5,
@@ -176,7 +175,7 @@ class PlayerView extends StatelessWidget {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.red.withOpacity(0.4),
+                      color: Colors.red.withValues(alpha: 0.4),
                       blurRadius: 4,
                       spreadRadius: 0.5,
                       offset: Offset(0, 1),
@@ -341,131 +340,22 @@ class PlayerView extends StatelessWidget {
         : Colors.black38;
   }
   
-  IconData _getActionIcon() {
-    final action = player.action?.toLowerCase() ?? '';
-    
-    if (action.contains('fold')) {
-      return Icons.cancel_outlined;
-    } else if (action.contains('check')) {
-      return Icons.check_circle_outline;
-    } else if (action.contains('call')) {
-      return Icons.call_outlined;
-    } else if (action.contains('raise') || action.contains('bet')) {
-      return Icons.arrow_circle_up_outlined;
-    } else if (action.contains('allin')) {
-      return Icons.flash_on;
-    }
-    
-    return Icons.help_outline;
-  }
-  
   Color _getBorderColor(ThemeData theme) {
     if (!player.isActive) {
       return Colors.grey;
     }
-    
+
     if (player.isCurrent) {
-      return Colors.amber;  // 当前玩家使用琥珀色边框
+      return Colors.amber; // 当前玩家使用琥珀色边框
     }
-    
+
     if (highlight) {
       return theme.colorScheme.primary;
     }
-    
-    return Colors.white30;  // 所有玩家统一使用相同边框颜色
+
+    return Colors.white30; // 所有玩家统一使用相同边框颜色
   }
-  
-  Color _getActionColor(BuildContext context) {
-    switch (player.action) {
-      case 'fold':
-        return Colors.red;
-      case 'call':
-        return Colors.blue;
-      case 'check':
-        return Colors.green;
-      case 'raise':
-      case 'bet':
-        return Colors.amber;
-      case 'allin':
-        return Colors.deepPurple;
-      default:
-        return Colors.grey;
-    }
-  }
-  
-  String _getActionText() {
-    switch (player.action) {
-      case 'fold':
-        return '弃牌';
-      case 'call':
-        return '跟注';
-      case 'check':
-        return '让牌';
-      case 'raise':
-        return '加注';
-      case 'bet':
-        return '下注';
-      case 'allin':
-        return '全押';
-      default:
-        return player.action ?? '';
-    }
-  }
-  
-  // 构建AI思考指示器，根据不同的模型显示不同效果
-  Widget _buildAIThinkingIndicator() {
-    // 思考中动画的颜色
-    Color thinkingColor = Colors.lightBlueAccent;
-    
-    // 特殊模型可以有不同的思考显示文本
-    String thinkingText = '思考中';
-    if (player.aiModel != null) {
-      if (player.aiModel! == 'ChatGPT-O1') {
-        thinkingText = '推理中';
-      } else if (player.aiModel! == 'DeepSeek-R1') {
-        thinkingText = '推理中';
-      } else if (player.aiModel! == 'Grok') {
-        thinkingText = '计算中';
-      } else if (player.aiModel! == '通义千问') {
-        thinkingText = '思量中';
-      }
-    }
-    
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: thinkingColor.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: thinkingColor.withOpacity(0.3),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: 10,
-            height: 10,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(thinkingColor),
-            ),
-          ),
-          SizedBox(width: 4),
-          Text(
-            '$thinkingText...',
-            style: TextStyle(
-              color: thinkingColor,
-              fontSize: 10,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-  
+
   Widget _buildPlayerName(BuildContext context) {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -515,176 +405,3 @@ class PlayerView extends StatelessWidget {
     );
   }
 }
-
-class PlayersLayout extends StatelessWidget {
-  final List<Player> players;
-  final String currentPlayerId;
-  final bool isShowdown;
-  
-  const PlayersLayout({
-    Key? key,
-    required this.players,
-    required this.currentPlayerId,
-    this.isShowdown = false,
-  }) : super(key: key);
-  
-  @override
-  Widget build(BuildContext context) {
-    // 根据玩家数量布局
-    switch (players.length) {
-      case 0:
-      case 1:
-        return _buildEmptyLayout();
-      case 2:
-        return _buildTwoPlayersLayout(context);
-      case 3:
-      case 4:
-        return _buildSmallTableLayout(context);
-      default:
-        return _buildFullTableLayout(context);
-    }
-  }
-  
-  Widget _buildEmptyLayout() {
-    return Center(
-      child: Text(
-        '等待玩家加入',
-        style: TextStyle(
-          color: Colors.white70,
-          fontSize: 18,
-        ),
-      ),
-    );
-  }
-  
-  Widget _buildTwoPlayersLayout(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Padding(
-          padding: EdgeInsets.only(top: 16.0),
-          child: _buildPlayerWidget(players[1], context, PlayerDirection.top),
-        ),
-        SizedBox(height: MediaQuery.of(context).size.height * 0.3),
-        Padding(
-          padding: EdgeInsets.only(bottom: 16.0),
-          child: _buildPlayerWidget(players[0], context, PlayerDirection.bottom),
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildSmallTableLayout(BuildContext context) {
-    return Stack(
-      children: [
-        // 顶部玩家
-        Positioned(
-          top: 16,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: _buildPlayerWidget(players[1], context, PlayerDirection.top),
-          ),
-        ),
-        // 左侧玩家
-        if (players.length > 2)
-          Positioned(
-            top: MediaQuery.of(context).size.height * 0.3,
-            left: 16,
-            child: _buildPlayerWidget(players[2], context, PlayerDirection.left),
-          ),
-        // 右侧玩家
-        if (players.length > 3)
-          Positioned(
-            top: MediaQuery.of(context).size.height * 0.3,
-            right: 16,
-            child: _buildPlayerWidget(players[3], context, PlayerDirection.right),
-          ),
-        // 底部玩家
-        Positioned(
-          bottom: 16,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: _buildPlayerWidget(players[0], context, PlayerDirection.bottom),
-          ),
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildFullTableLayout(BuildContext context) {
-    return Stack(
-      children: [
-        // 顶部玩家
-        Positioned(
-          top: 16,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: _buildPlayerWidget(players[4], context, PlayerDirection.top),
-          ),
-        ),
-        // 左上玩家
-        Positioned(
-          top: MediaQuery.of(context).size.height * 0.15,
-          left: 16,
-          child: _buildPlayerWidget(players[3], context, PlayerDirection.left),
-        ),
-        // 右上玩家
-        Positioned(
-          top: MediaQuery.of(context).size.height * 0.15,
-          right: 16,
-          child: _buildPlayerWidget(players[5], context, PlayerDirection.right),
-        ),
-        // 左下玩家
-        Positioned(
-          bottom: MediaQuery.of(context).size.height * 0.15,
-          left: 16,
-          child: _buildPlayerWidget(players[2], context, PlayerDirection.left),
-        ),
-        // 右下玩家
-        Positioned(
-          bottom: MediaQuery.of(context).size.height * 0.15,
-          right: 16,
-          child: _buildPlayerWidget(players[6], context, PlayerDirection.right),
-        ),
-        // 底部左玩家
-        Positioned(
-          bottom: 16,
-          left: MediaQuery.of(context).size.width * 0.25,
-          child: _buildPlayerWidget(players[1], context, PlayerDirection.bottom),
-        ),
-        // 底部右玩家
-        Positioned(
-          bottom: 16,
-          right: MediaQuery.of(context).size.width * 0.25,
-          child: _buildPlayerWidget(players[7], context, PlayerDirection.bottom),
-        ),
-        // 底部中玩家
-        Positioned(
-          bottom: 16,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: _buildPlayerWidget(players[0], context, PlayerDirection.bottom),
-          ),
-        ),
-      ],
-    );
-  }
-  
-  Widget _buildPlayerWidget(Player player, BuildContext context, PlayerDirection direction) {
-    return SizedBox(
-      width: MediaQuery.of(context).size.width * 0.3,
-      child: PlayerView(
-        player: player,
-        isCurrentPlayer: player.id == currentPlayerId,
-        isShowdown: isShowdown,
-        highlight: player.isCurrent,
-        isDealer: player.isDealer,
-        direction: direction,
-      ),
-    );
-  }
-} 

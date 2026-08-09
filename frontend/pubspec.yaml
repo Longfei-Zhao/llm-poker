@@ -1,33 +1,29 @@
 name: poker_app
-description: AI德州扑克对决Flutter应用
+description: Flutter spectator UI for LLM-vs-LLM Texas Hold'em battles
 
 publish_to: 'none'
 
 version: 1.0.0+1
 
 environment:
-  sdk: ">=2.18.0 <3.0.0"
+  sdk: ">=3.0.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
-  flutter_web_plugins:
-    sdk: flutter
   cupertino_icons: ^1.0.2
   web_socket_channel: ^2.2.0
-  provider: ^6.0.3
-  http: ^0.13.5
-  shared_preferences: ^2.1.0
+  http: ^1.2.0
   flutter_svg: ^2.0.9
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^2.0.1
+  flutter_lints: ^5.0.0
 
 flutter:
   uses-material-design: true
 
   assets:
     - assets/images/
-    - assets/images/llm_logos/ 
+    - assets/images/llm_logos/

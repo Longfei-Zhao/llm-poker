@@ -17,7 +17,7 @@ class ThinkingRecord {
     required this.gameStage,
     this.action,
     DateTime? timestamp,
-  }) : this.timestamp = timestamp ?? DateTime.now();
+  }) : timestamp = timestamp ?? DateTime.now();
   
   // 从JSON创建思考记录对象
   factory ThinkingRecord.fromJson(Map<String, dynamic> json) {
