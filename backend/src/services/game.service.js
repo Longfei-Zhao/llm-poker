@@ -1,5 +1,7 @@
 const { Hand } = require('pokersolver');
 const { v4: uuidv4 } = require('uuid');
+const config = require('../config');
+const logger = require('../utils/logger');
 
 class GameService {
   constructor() {
@@ -7,37 +9,46 @@ class GameService {
   }
 
   // 创建新游戏
-  createGame(players) {
-    const gameId = Math.random().toString(36).substring(2, 15);
-    
+  createGame(players, options = {}) {
+    const gameId = uuidv4();
+
     // 创建新游戏状态
     const gameState = {
       id: gameId,
       players: players.map((player, index) => ({
         ...player,
-        position: index + 1,
+        position: Number.isInteger(player.position) && player.position > 0 ? player.position : index + 1,
         isActive: true,
         isCurrent: false,
+        isAllIn: false,
+        isAI: true, // 本项目中所有玩家都是AI
         cards: [],
         bet: 0,
-        chips: 1000, // 初始筹码
+        chips: Number.isInteger(player.chips) && player.chips > 0 ? player.chips : 1000, // 初始筹码
+        totalContribution: 0, // 本手牌累计投入（用于边池计算）
         hasActed: false,
         action: null
       })),
       state: 'waiting', // 游戏状态: waiting, preflop, flop, turn, river, showdown, finished
       pot: 0,
-      smallBlind: 5,
-      bigBlind: 10,
+      smallBlind: config.SMALL_BLIND,
+      bigBlind: config.BIG_BLIND,
       currentBet: 0,
       currentPlayerIndex: 0,
-      dealerIndex: Math.floor(Math.random() * players.length),
+      // 支持注入dealerIndex以便测试确定性
+      dealerIndex: players.length === 0
+        ? 0
+        : (Number.isInteger(options.dealerIndex)
+          ? ((options.dealerIndex % players.length) + players.length) % players.length
+          : Math.floor(Math.random() * players.length)),
       lastRaiseIndex: -1,
-      lastRaiseAmount: 0, // 添加记录最后一次加注的增量
+      lastRaiseAmount: 0, // 记录最后一次加注的增量
+      round: 0,
       communityCards: [],
       deck: [],
       actionHistory: []
     };
-    
+
     // 保存游戏状态
     this.games.set(gameId, gameState);
     return gameState;
@@ -45,11 +56,10 @@ class GameService {
 
   // 开始游戏
   startGame(gameId) {
-    console.log('games:', this.games);
     const game = this.games.get(gameId);
     if (!game) throw new Error('Game not found');
     // 允许从waiting或finished状态开始游戏
-    if (game.state !== 'waiting' && game.state !== 'finished') 
+    if (game.state !== 'waiting' && game.state !== 'finished')
       throw new Error('Game already in progress');
     if (game.players.length < 2) throw new Error('Not enough players');
 
@@ -60,6 +70,7 @@ class GameService {
     game.pot = 0;
     game.currentBet = 0;
     game.lastRaiseIndex = -1;
+    game.lastRaiseAmount = 0;
     game.actionHistory = []; // 重置行动历史
 
     // 重置玩家状态
@@ -67,8 +78,11 @@ class GameService {
       player.cards = [];
       player.isActive = true;
       player.isCurrent = false;
+      player.isAllIn = false;
       player.bet = 0;
+      player.totalContribution = 0;
       player.hasActed = false;
+      player.action = null;
     });
 
     // 发手牌
@@ -77,19 +91,18 @@ class GameService {
         player.cards.push(game.deck.pop());
       }
     }
+    logger.debug('发牌完成:', game.players.map(p => ({ id: p.id, cards: p.cards })));
 
     // 设置初始状态
     game.state = 'preflop';
-    
-    // 收取盲注
-    const sbIndex = (game.dealerIndex + 1) % game.players.length;
-    const bbIndex = (game.dealerIndex + 2) % game.players.length;
-    
-    game.players[sbIndex].chips -= game.smallBlind;
-    game.players[sbIndex].bet = game.smallBlind;
-    game.players[bbIndex].chips -= game.bigBlind;
-    game.players[bbIndex].bet = game.bigBlind;
-    game.pot = game.smallBlind + game.bigBlind;
+
+    // 收取盲注：单挑时庄家是小盲，多人时庄家左侧为小盲
+    const headsUp = game.players.length === 2;
+    const sbIndex = headsUp ? game.dealerIndex : (game.dealerIndex + 1) % game.players.length;
+    const bbIndex = headsUp ? (game.dealerIndex + 1) % game.players.length : (game.dealerIndex + 2) % game.players.length;
+
+    const sbPaid = this.postBlind(game, sbIndex, game.smallBlind);
+    const bbPaid = this.postBlind(game, bbIndex, game.bigBlind);
     game.currentBet = game.bigBlind;
 
     // 记录盲注操作到历史
@@ -100,24 +113,47 @@ class GameService {
           playerId: game.players[sbIndex].id,
           playerPosition: this.calculateRelativePosition(game.dealerIndex, sbIndex, game.players.length),
           action: 'smallBlind',
-          amount: game.smallBlind,
+          amount: sbPaid,
+          isAllIn: game.players[sbIndex].isAllIn,
           timestamp: new Date().toISOString()
         },
         {
           playerId: game.players[bbIndex].id,
           playerPosition: this.calculateRelativePosition(game.dealerIndex, bbIndex, game.players.length),
           action: 'bigBlind',
-          amount: game.bigBlind,
+          amount: bbPaid,
+          isAllIn: game.players[bbIndex].isAllIn,
           timestamp: new Date().toISOString()
         }
       ]
     });
 
-    // 设置第一个行动的玩家（大盲注后的玩家）
-    game.currentPlayerIndex = (game.dealerIndex + 3) % game.players.length;
-    game.players[game.currentPlayerIndex].isCurrent = true;
+    // 设置第一个行动的玩家：单挑为庄家（小盲），多人为大盲后一位
+    const firstToAct = headsUp ? game.dealerIndex : (game.dealerIndex + 3) % game.players.length;
+    const startIdx = this.findActionableFrom(game, firstToAct);
+    if (startIdx === -1) {
+      // 盲注已让所有玩家all-in，无人可行动，直接快进到摊牌
+      this.fastForwardToShowdown(game);
+      return game;
+    }
+    game.currentPlayerIndex = startIdx;
+    game.players[startIdx].isCurrent = true;
 
     return game;
+  }
+
+  // 收取盲注：不足时按剩余筹码全押
+  postBlind(game, index, blindAmount) {
+    const player = game.players[index];
+    const paid = Math.min(blindAmount, player.chips);
+    player.chips -= paid;
+    player.bet = paid;
+    player.totalContribution += paid;
+    game.pot += paid;
+    if (player.chips === 0) {
+      player.isAllIn = true;
+    }
+    return paid;
   }
 
   // 处理玩家行动
@@ -125,109 +161,131 @@ class GameService {
     const game = this.games.get(gameId);
     if (!game) throw new Error('Game not found');
 
+    // 输入校验：金额必须是非负整数，防止NaN污染筹码和底池
+    if (amount === undefined || amount === null) amount = 0;
+    if (typeof amount !== 'number' || !Number.isInteger(amount) || amount < 0) {
+      throw new Error('Invalid amount');
+    }
+
     const playerIndex = game.players.findIndex(p => p.id === playerId);
     if (playerIndex === -1) throw new Error('Player not found');
-    
+
     const player = game.players[playerIndex];
     if (!player.isCurrent) throw new Error('Not your turn');
 
-    // 重置当前玩家状态
-    player.isCurrent = false;
-    
-    // 确定是否是All-in
-    let isAllIn = false;
-
+    // 先完成全部校验再修改状态，非法动作直接抛错（由WS层决定替代动作）
     switch (action) {
       case 'fold':
-        player.isActive = false;
-        player.hasActed = true;
-        break;
-      case 'call':
-        const callAmount = game.currentBet - player.bet;
-        if (callAmount > player.chips) throw new Error('Not enough chips');
-        player.chips -= callAmount;
-        player.bet = game.currentBet;
-        game.pot += callAmount;
-        player.hasActed = true;
-        isAllIn = (player.chips === 0);
-        break;
-      case 'allin':
-        // 玩家所有筹码都投入
-        const allinAmount = player.chips;
-        player.bet += allinAmount;
-        game.pot += allinAmount;
-        // 更新当前下注金额，如果all-in金额大于当前下注
-        if (player.bet > game.currentBet) {
-          game.currentBet = player.bet;
-          game.lastRaiseIndex = game.currentPlayerIndex;
-        }
-        player.chips = 0;
-        player.hasActed = true;
-        isAllIn = true;
-        break;
-      case 'raise':
-        if (amount <= game.currentBet) throw new Error('Raise amount must be greater than current bet');
-        if (amount > player.chips + player.bet) throw new Error('Not enough chips');
-        const raiseAmount = amount - player.bet;
-        player.chips -= raiseAmount;
-        player.bet = amount;
-        game.pot += raiseAmount;
-        // 计算加注增量（相对于当前最高下注的增加值）
-        const raiseIncrement = amount - game.currentBet;
-        game.lastRaiseAmount = raiseIncrement; // 记录本次加注增量
-        game.currentBet = amount;
-        game.lastRaiseIndex = game.currentPlayerIndex;
-        player.hasActed = true;
-        isAllIn = (player.chips === 0);
-        // 重置其他玩家的hasActed状态
-        game.players.forEach(p => {
-          if (p.id !== player.id && p.isActive) {
-            p.hasActed = false;
-          }
-        });
         break;
       case 'check':
-        if (game.currentBet > 0) {
-          // 如果已有下注，将check转为fold处理
-          console.warn(`玩家${player.name}(${playerId})在不能check的情况下尝试check，自动转为fold处理`);
-          player.isActive = false;
-          player.hasActed = true;
-          // 记录实际执行的操作是fold
-          action = 'fold';
-        } else {
-          player.hasActed = true;
-        }
+        // 只有下注已对齐时才能check
+        if (player.bet < game.currentBet) throw new Error('Cannot check when facing a bet');
+        break;
+      case 'call': {
+        const toCall = game.currentBet - player.bet;
+        if (toCall > player.chips) throw new Error('Not enough chips');
+        break;
+      }
+      case 'raise': {
+        // 最小加注：当前注 + max(上次加注增量, 大盲)
+        const minRaiseTo = game.currentBet + Math.max(game.lastRaiseAmount, game.bigBlind);
+        if (amount < minRaiseTo) throw new Error(`Raise must be at least ${minRaiseTo}`);
+        if (amount > player.chips + player.bet) throw new Error('Not enough chips');
+        break;
+      }
+      case 'allin':
+        if (player.chips <= 0) throw new Error('No chips to go all-in');
         break;
       default:
         throw new Error('Invalid action');
     }
 
+    // 重置当前玩家状态
+    player.isCurrent = false;
+
+    switch (action) {
+      case 'fold':
+        player.isActive = false;
+        break;
+      case 'check':
+        break;
+      case 'call': {
+        const callAmount = Math.max(game.currentBet - player.bet, 0);
+        player.chips -= callAmount;
+        player.bet += callAmount;
+        player.totalContribution += callAmount;
+        game.pot += callAmount;
+        break;
+      }
+      case 'raise': {
+        const addAmount = amount - player.bet;
+        player.chips -= addAmount;
+        player.bet = amount;
+        player.totalContribution += addAmount;
+        game.pot += addAmount;
+        // 记录本次加注增量并重新打开下注
+        game.lastRaiseAmount = amount - game.currentBet;
+        game.currentBet = amount;
+        game.lastRaiseIndex = playerIndex;
+        game.players.forEach(p => {
+          if (p.id !== player.id && p.isActive && !p.isAllIn) {
+            p.hasActed = false;
+          }
+        });
+        break;
+      }
+      case 'allin': {
+        const allinAmount = player.chips;
+        player.chips = 0;
+        player.bet += allinAmount;
+        player.totalContribution += allinAmount;
+        game.pot += allinAmount;
+        if (player.bet > game.currentBet) {
+          const increment = player.bet - game.currentBet;
+          // 不足最小加注增量的all-in视为“跟注加码”，不更新加注增量、不重新打开下注
+          const isFullRaise = increment >= Math.max(game.lastRaiseAmount, game.bigBlind);
+          game.currentBet = player.bet;
+          game.lastRaiseIndex = playerIndex;
+          if (isFullRaise) {
+            game.lastRaiseAmount = increment;
+            game.players.forEach(p => {
+              if (p.id !== player.id && p.isActive && !p.isAllIn) {
+                p.hasActed = false;
+              }
+            });
+          }
+        }
+        break;
+      }
+    }
+
+    player.hasActed = true;
+    // 筹码打空即标记all-in
+    if (player.isActive && player.chips === 0 && (action === 'call' || action === 'raise' || action === 'allin')) {
+      player.isAllIn = true;
+    }
+
     // 记录行动到历史
-    // 检查当前阶段是否已有记录
     if (!game.actionHistory.length || game.actionHistory[game.actionHistory.length - 1].stage !== game.state) {
-      // 如果是新阶段的第一个行动，创建新阶段记录
       game.actionHistory.push({
         stage: game.state,
         actions: []
       });
     }
-    
-    // 获取当前阶段历史
+
     const currentStageHistory = game.actionHistory[game.actionHistory.length - 1];
-    
-    // 添加行动记录
     currentStageHistory.actions.push({
       playerId,
       playerPosition: this.calculateRelativePosition(game.dealerIndex, playerIndex, game.players.length),
       action,
       amount: (action === 'raise' || action === 'call' || action === 'allin') ? player.bet : 0,
-      isAllIn,
+      isAllIn: player.isAllIn,
       timestamp: new Date().toISOString()
     });
 
     // 记录玩家的最后行动
     player.action = action;
-    
+
     // 检查是否只剩一个玩家
     const activePlayers = game.players.filter(p => p.isActive);
     if (activePlayers.length === 1) {
@@ -235,7 +293,7 @@ class GameService {
       this.handleShowdown(game);
       return game;
     }
-    
+
     // 检查当前回合是否结束
     if (this.isRoundComplete(game)) {
       this.moveToNextRound(game);
@@ -275,37 +333,43 @@ class GameService {
     }
   }
 
-  // 移动到下一个玩家
+  // 从startIndex起（含自身）查找第一个还能行动的玩家（未弃牌且未all-in）
+  findActionableFrom(game, startIndex) {
+    const n = game.players.length;
+    for (let offset = 0; offset < n; offset++) {
+      const idx = (startIndex + offset) % n;
+      const p = game.players[idx];
+      if (p.isActive && !p.isAllIn) return idx;
+    }
+    return -1;
+  }
+
+  // 统计还能行动的玩家数
+  countActionable(game) {
+    return game.players.filter(p => p.isActive && !p.isAllIn).length;
+  }
+
+  // 移动到下一个玩家（跳过已弃牌和all-in的玩家）
   moveToNextPlayer(game) {
-    do {
-      game.currentPlayerIndex = (game.currentPlayerIndex + 1) % game.players.length;
-    } while (!game.players[game.currentPlayerIndex].isActive);
-    game.players[game.currentPlayerIndex].isCurrent = true;
+    const next = this.findActionableFrom(game, (game.currentPlayerIndex + 1) % game.players.length);
+    if (next === -1) {
+      // 无人可行动（理论上isRoundComplete已覆盖），兜底推进回合
+      this.moveToNextRound(game);
+      return;
+    }
+    game.currentPlayerIndex = next;
+    game.players[next].isCurrent = true;
   }
 
   // 检查当前回合是否结束
   isRoundComplete(game) {
-    // 检查是否所有玩家都行动过，且下注相等
-    let lastActivePlayer = null;
-    let allBetsEqual = true;
-    let allPlayersActed = true;
-
-    for (let player of game.players) {
-      if (!player.isActive) continue;
-      
-      if (lastActivePlayer === null) {
-        lastActivePlayer = player;
-      } else if (player.bet !== lastActivePlayer.bet) {
-        allBetsEqual = false;
-      }
-
-      // 检查是否所有玩家都行动过
-      if (!player.hasActed && player.isActive) {
-        allPlayersActed = false;
-      }
+    // all-in玩家无需再行动；其余活跃玩家必须已行动且下注对齐
+    for (const player of game.players) {
+      if (!player.isActive || player.isAllIn) continue;
+      if (!player.hasActed) return false;
+      if (player.bet !== game.currentBet) return false;
     }
-
-    return allBetsEqual && allPlayersActed;
+    return true;
   }
 
   // 移动到下一个回合
@@ -315,17 +379,17 @@ class GameService {
       const gameId = game;
       game = this.games.get(gameId);
       if (!game) {
-        console.error(`游戏不存在: ${gameId}`);
+        logger.error(`游戏不存在: ${gameId}`);
         return null;
       }
     }
-    
+
     // 安全检查：确保game和players存在
     if (!game || !game.players) {
-      console.error('无效的游戏状态或玩家列表');
+      logger.error('无效的游戏状态或玩家列表');
       return game;
     }
-    
+
     // 重置玩家行动状态
     game.players.forEach(player => {
       if (player.isActive) {
@@ -337,7 +401,13 @@ class GameService {
     // 重置下注相关状态
     game.currentBet = 0;
     game.lastRaiseIndex = -1;
-    game.lastRaiseAmount = 0; // 重置最后一次加注的增量
+    game.lastRaiseAmount = 0;
+
+    // 可行动玩家不足两人时无法继续下注：快进剩余公共牌直接摊牌
+    if (['preflop', 'flop', 'turn', 'river'].includes(game.state) && this.countActionable(game) < 2) {
+      this.fastForwardToShowdown(game);
+      return game;
+    }
 
     // 决定下一阶段
     let nextStage;
@@ -360,75 +430,118 @@ class GameService {
         game.communityCards.push(game.deck.pop());
         break;
       case 'river':
-        nextStage = 'showdown';
+        game.state = 'showdown';
         this.handleShowdown(game);
-        return; // 摊牌阶段不需要继续
+        return game;
       case 'showdown':
         this.startNewRound(game);
-        return; // 新一轮已经设置了玩家状态
+        return game;
       case 'finished':
-        return; // 游戏结束
+        return game;
     }
 
     // 更新游戏状态
     game.state = nextStage;
-    
-    // 为新阶段创建历史记录条目(除非是showdown)
-    if (nextStage !== 'showdown' && nextStage !== 'finished') {
-      game.actionHistory.push({
-        stage: nextStage,
-        actions: []
-      });
-    }
 
-    // 设置第一个行动玩家（最靠近小盲注的玩家）
-    game.currentPlayerIndex = (game.dealerIndex + 1) % game.players.length;
-    while (!game.players[game.currentPlayerIndex].isActive && game.players.some(p => p.isActive)) {
-      game.currentPlayerIndex = (game.currentPlayerIndex + 1) % game.players.length;
-    }
-    game.players[game.currentPlayerIndex].isCurrent = true;
-    
-    // 返回更新后的游戏对象
+    // 为新阶段创建历史记录条目
+    game.actionHistory.push({
+      stage: nextStage,
+      actions: []
+    });
+
+    // 设置第一个行动玩家（庄家左侧第一个可行动的玩家）
+    const startIdx = this.findActionableFrom(game, (game.dealerIndex + 1) % game.players.length);
+    game.currentPlayerIndex = startIdx;
+    game.players[startIdx].isCurrent = true;
+
     return game;
   }
 
-  // 处理摊牌阶段
+  // 无人可再下注时补完公共牌并直接摊牌
+  fastForwardToShowdown(game) {
+    while (game.communityCards.length < 5) {
+      game.communityCards.push(game.deck.pop());
+    }
+    game.state = 'showdown';
+    this.handleShowdown(game);
+  }
+
+  // 处理摊牌阶段（按每人实际投入构建主池/边池逐池分配）
   handleShowdown(game) {
-    // 获取所有活跃玩家的手牌
     const activePlayers = game.players.filter(p => p.isActive);
-    
-    if (activePlayers.length === 1) {
-      // 如果只有一个玩家，直接获胜
-      const winner = activePlayers[0];
-      winner.chips += game.pot;
-      game.pot = 0;
-      game.state = 'finished';
-      return;
+
+    // 按未弃牌玩家的投入从小到大分层构建奖池
+    const levels = [...new Set(activePlayers.map(p => p.totalContribution))]
+      .filter(c => c > 0)
+      .sort((a, b) => a - b);
+
+    const pots = [];
+    let prevLevel = 0;
+    for (const level of levels) {
+      let amount = 0;
+      for (const p of game.players) {
+        amount += Math.min(p.totalContribution, level) - Math.min(p.totalContribution, prevLevel);
+      }
+      if (amount > 0) {
+        pots.push({
+          amount,
+          eligible: activePlayers.filter(p => p.totalContribution >= level)
+        });
+      }
+      prevLevel = level;
     }
 
-    // 计算每个玩家的最佳手牌
-    const playerHands = activePlayers.map(player => {
-      const cards = [...player.cards, ...game.communityCards];
-      const hand = Hand.solve(cards);
-      return {
-        player,
-        hand
-      };
-    });
+    // 超出最高有效层的投入无人可赢，退还本人（未被跟注的部分）
+    for (const p of game.players) {
+      const excess = p.totalContribution - Math.min(p.totalContribution, prevLevel);
+      if (excess > 0) {
+        p.chips += excess;
+      }
+    }
 
-    // 找出获胜者
-    const winners = Hand.winners(playerHands.map(ph => ph.hand));
-    const winningPlayers = playerHands
-      .filter(ph => winners.includes(ph.hand))
-      .map(ph => ph.player);
+    // 逐池评牌并分配（只有一名有效玩家时无需评牌）
+    for (const pot of pots) {
+      let winners;
+      if (pot.eligible.length === 1) {
+        winners = pot.eligible;
+      } else {
+        const playerHands = pot.eligible.map(player => ({
+          player,
+          hand: Hand.solve([...player.cards, ...game.communityCards])
+        }));
+        const winningHands = Hand.winners(playerHands.map(ph => ph.hand));
+        winners = playerHands
+          .filter(ph => winningHands.includes(ph.hand))
+          .map(ph => ph.player);
+      }
+      this.distributePot(game, pot.amount, winners);
+    }
 
-    // 分配奖池
-    const winAmount = Math.floor(game.pot / winningPlayers.length);
-    winningPlayers.forEach(player => {
-      player.chips += winAmount;
-    });
     game.pot = 0;
     game.state = 'finished';
+  }
+
+  // 分配单个奖池，余数筹码从庄家左侧起按座位顺序分给赢家
+  distributePot(game, amount, winners) {
+    const share = Math.floor(amount / winners.length);
+    let remainder = amount - share * winners.length;
+    const ordered = [...winners].sort(
+      (a, b) => this.seatOffsetFromDealer(game, a) - this.seatOffsetFromDealer(game, b)
+    );
+    for (const player of ordered) {
+      player.chips += share;
+      if (remainder > 0) {
+        player.chips += 1;
+        remainder--;
+      }
+    }
+  }
+
+  // 玩家相对庄家左侧的座位偏移（小盲位=0）
+  seatOffsetFromDealer(game, player) {
+    const idx = game.players.indexOf(player);
+    const n = game.players.length;
+    return (idx - game.dealerIndex - 1 + 2 * n) % n;
   }
 
   // 开始新一轮
@@ -438,28 +551,30 @@ class GameService {
       const gameId = game;
       game = this.games.get(gameId);
       if (!game) {
-        console.error(`游戏不存在: ${gameId}`);
+        logger.error(`游戏不存在: ${gameId}`);
         return null;
       }
     }
-    
+
     // 安全检查：确保game和players存在
     if (!game || !game.players) {
-      console.error('无效的游戏状态或玩家列表');
+      logger.error('无效的游戏状态或玩家列表');
       return game;
     }
-    
-    // 移动庄家位置
-    game.dealerIndex = (game.dealerIndex + 1) % game.players.length;
-    
+
+    // 记录旧座次，按玩家id而不是索引轮转按钮，避免淘汰玩家后按钮错位
+    const oldOrder = game.players.map(p => p.id);
+    const oldDealerPos = game.dealerIndex;
+
     // 重置游戏状态
-    game.state = 'waiting';  // 显式设置为waiting状态，以便可以重新开始游戏
+    game.state = 'waiting'; // 显式设置为waiting状态，以便可以重新开始游戏
     game.deck = this.createDeck();
+    this.shuffleDeck(game.deck);
     game.communityCards = [];
     game.pot = 0;
     game.currentBet = 0;
     game.lastRaiseIndex = -1;
-    game.lastRaiseAmount = 0; // 重置最后一次加注的增量
+    game.lastRaiseAmount = 0;
     game.round++;
 
     // 重置玩家状态
@@ -467,76 +582,52 @@ class GameService {
       player.cards = [];
       player.isActive = true;
       player.isCurrent = false;
+      player.isAllIn = false;
       player.bet = 0;
+      player.totalContribution = 0;
       player.hasActed = false;
+      player.action = null;
     });
 
-    // 检查是否有玩家筹码不足
-    game.players = game.players.filter(player => player.chips >= game.bigBlind);
-    
+    // 淘汰没有筹码的玩家
+    game.players = game.players.filter(player => player.chips > 0);
+
     // 如果玩家数量不足，游戏结束
     if (game.players.length < 2) {
       game.state = 'finished';
       return game;
     }
-    
-    // 返回更新后的游戏对象
-    return game;
-  }
 
-  // 保存游戏状态
-  saveGame(gameState) {
-    if (!gameState || !gameState.id) {
-      console.error('无法保存游戏：游戏状态或ID无效');
-      return false;
+    // 按钮移动到旧座次中下一位仍在场的玩家
+    for (let offset = 1; offset <= oldOrder.length; offset++) {
+      const candidateId = oldOrder[(oldDealerPos + offset) % oldOrder.length];
+      const newIdx = game.players.findIndex(p => p.id === candidateId);
+      if (newIdx !== -1) {
+        game.dealerIndex = newIdx;
+        break;
+      }
     }
-    
-    // 如果传入的是前端格式的游戏状态，需要转换为后端格式
-    const gameId = gameState.id;
-    
-    // 检查游戏是否已存在
-    if (this.games.has(gameId)) {
-      console.log(`游戏ID ${gameId} 已存在，更新状态`);
-      // 可以选择更新现有游戏或保留现有游戏
-      // 这里我们选择保留现有游戏，避免覆盖可能的其他状态
-      return true;
-    }
-    
-    // 创建一个新的游戏对象
-    const newGame = {
-      id: gameId,
-      players: gameState.players || [],
-      state: gameState.stage || 'waiting',
-      deck: this.createDeck(),
-      communityCards: gameState.communityCards || [],
-      pot: gameState.pot || 0,
-      currentBet: gameState.currentBet || 0,
-      smallBlind: gameState.smallBlind || 1,
-      bigBlind: gameState.bigBlind || 2,
-      dealerIndex: gameState.dealerIndex || 0,
-      currentPlayerIndex: gameState.currentPlayerIndex || 0,
-      lastRaiseIndex: -1,
-      round: 0
-    };
-    
-    // 保存到games映射中
-    this.games.set(gameId, newGame);
-    console.log(`游戏ID ${gameId} 已保存到GameService`);
-    return true;
+
+    return game;
   }
 
   // 计算玩家相对位置（按钮位、小盲、大盲等）
   calculateRelativePosition(dealerIndex, playerIndex, totalPlayers) {
     // 计算相对位置
     let relativePos = (playerIndex - dealerIndex + totalPlayers) % totalPlayers;
-    
+
+    // 单挑：庄家兼小盲，另一位是大盲
+    if (totalPlayers === 2) {
+      return relativePos === 0 ? 'BTN' : 'BB';
+    }
+
     // 位置映射
     const positionNames = {
       0: "BTN", // 庄家/按钮位
       1: "SB",  // 小盲
       2: "BB",  // 大盲
     };
-    
+
     // 根据玩家数量动态计算其他位置
     if (totalPlayers <= 3) {
       return positionNames[relativePos] || `P${relativePos}`;
@@ -557,4 +648,4 @@ class GameService {
   }
 }
 
-module.exports = { GameService }; 
+module.exports = { GameService };

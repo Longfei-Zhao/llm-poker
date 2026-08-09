@@ -5,6 +5,7 @@ const cors = require('cors');
 const WebSocket = require('ws');
 const { WebSocketService } = require('./services/ws.service');
 const aiService = require('./services/ai.service');
+const logger = require('./utils/logger');
 require('dotenv').config();
 
 // 创建Express应用
@@ -100,15 +101,32 @@ wsService.initialize(wss);
 
 // 启动服务器
 server.listen(PORT, () => {
-  console.log(`服务器已启动，监听端口 ${PORT}`);
-  console.log(`健康检查: http://localhost:${PORT}/api/health`);
+  logger.info(`服务器已启动，监听端口 ${PORT}`);
+  logger.info(`健康检查: http://localhost:${PORT}/api/health`);
 });
 
-// 处理未捕获的异常
+// 未捕获异常时状态已不可信，记录后退出，交给进程管理器重启
 process.on('uncaughtException', (error) => {
-  console.error('未捕获的异常:', error);
+  logger.error('未捕获的异常，进程退出:', error);
+  process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('未处理的拒绝:', reason);
-}); 
+process.on('unhandledRejection', (reason) => {
+  logger.error('未处理的拒绝:', reason);
+});
+
+// 优雅关闭
+function shutdown(signal) {
+  logger.info(`收到${signal}，正在关闭服务器...`);
+  wss.clients.forEach(client => client.terminate());
+  wss.close();
+  server.close(() => {
+    logger.info('服务器已关闭');
+    process.exit(0);
+  });
+  // 兜底：5秒内未关闭则强制退出
+  setTimeout(() => process.exit(0), 5000).unref();
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM')); 

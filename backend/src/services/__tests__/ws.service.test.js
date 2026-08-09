@@ -1,215 +1,333 @@
-const WebSocket = require('ws');
-const { WebSocketService } = require('../ws.service');
-const { GameController } = require('../../controllers/game.controller');
+process.env.LOG_LEVEL = 'silent'; // 测试中静默日志
 
-// Mock WebSocket and GameController
-jest.mock('ws');
-jest.mock('../../controllers/game.controller');
+jest.mock('../ai.service', () => ({
+  createAgent: jest.fn().mockResolvedValue({ status: 'ok' }),
+  getDecision: jest.fn(),
+  deleteAgent: jest.fn().mockResolvedValue(undefined)
+}));
+
+const aiService = require('../ai.service');
+const { WebSocketService } = require('../ws.service');
+const config = require('../../config');
+
+// 构造模拟的WebSocket连接
+function createMockWs() {
+  const handlers = {};
+  const ws = {
+    readyState: 1,
+    sent: [],
+    on: jest.fn((event, cb) => {
+      handlers[event] = handlers[event] || [];
+      handlers[event].push(cb);
+    }),
+    send: jest.fn((data) => {
+      ws.sent.push(JSON.parse(data));
+    }),
+    ping: jest.fn(),
+    terminate: jest.fn(),
+    emit: (event, ...args) => {
+      (handlers[event] || []).forEach(cb => cb(...args));
+    }
+  };
+  return ws;
+}
+
+function connect(wsService, wss, ws) {
+  const connectionHandler = wss.on.mock.calls.find(call => call[0] === 'connection')[1];
+  connectionHandler(ws);
+}
+
+const testPlayers = [
+  { id: 'p1', name: 'Claude-A', model: 'claude-3-7-sonnet' },
+  { id: 'p2', name: 'GPT-B', model: 'gpt-4o' },
+  { id: 'p3', name: 'Qwen-C', model: 'qwen-plus' }
+];
 
 describe('WebSocketService', () => {
   let wsService;
-  let mockServer;
-  let mockWs;
-  let messageCallback;
-  let closeCallback;
-  let mockGameController;
+  let wss;
+  let ws;
 
   beforeEach(() => {
-    // 重置所有mock
     jest.clearAllMocks();
-
-    // 创建mock WebSocket服务器
-    mockServer = {
-      on: jest.fn()
-    };
-
-    // 创建mock WebSocket客户端
-    mockWs = {
-      on: jest.fn(),
-      send: jest.fn(),
-      readyState: WebSocket.OPEN
-    };
-
-    // 设置WebSocket.Server构造函数mock
-    WebSocket.Server = jest.fn(() => mockServer);
-
-    // 设置GameController mock
-    mockGameController = {
-      getGameState: jest.fn(),
-      createGame: jest.fn(),
-      startGame: jest.fn(),
-      handlePlayerAction: jest.fn()
-    };
-    GameController.mockImplementation(() => mockGameController);
-
-    // 创建WebSocketService实例
+    jest.useFakeTimers();
     wsService = new WebSocketService();
-    wsService.initialize({});
-
-    // 模拟客户端连接
-    const connectionCallback = mockServer.on.mock.calls.find(call => call[0] === 'connection')[1];
-    connectionCallback(mockWs);
-
-    // 获取message和close回调函数
-    messageCallback = mockWs.on.mock.calls.find(call => call[0] === 'message')[1];
-    closeCallback = mockWs.on.mock.calls.find(call => call[0] === 'close')[1];
+    wss = { on: jest.fn() };
+    wsService.initialize(wss);
+    ws = createMockWs();
+    connect(wsService, wss, ws);
   });
 
-  test('应正确初始化WebSocket服务器', () => {
-    expect(WebSocket.Server).toHaveBeenCalledWith(expect.any(Object));
-    expect(mockServer.on).toHaveBeenCalledWith('connection', expect.any(Function));
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
   });
 
-  test('应正确处理新的客户端连接', () => {
-    expect(mockWs.on).toHaveBeenCalledWith('message', expect.any(Function));
-    expect(mockWs.on).toHaveBeenCalledWith('close', expect.any(Function));
+  // 通过消息通道创建并开始一局游戏
+  function createAndStartGame() {
+    ws.emit('message', JSON.stringify({ type: 'createGame', players: testPlayers }));
+    const created = ws.sent.find(m => m.type === 'gameCreated');
+    ws.emit('message', JSON.stringify({ type: 'startGame', gameId: created.gameState.id }));
+    return created.gameState.id;
+  }
+
+  describe('连接管理', () => {
+    test('连接建立后应注册消息处理并发送欢迎消息', () => {
+      expect(wss.on).toHaveBeenCalledWith('connection', expect.any(Function));
+      expect(ws.on).toHaveBeenCalledWith('message', expect.any(Function));
+      expect(ws.on).toHaveBeenCalledWith('close', expect.any(Function));
+      expect(ws.on).toHaveBeenCalledWith('pong', expect.any(Function));
+      expect(ws.sent.some(m => m.type === 'connection')).toBe(true);
+    });
+
+    test('旧连接关闭不应清空新连接的引用', () => {
+      const ws2 = createMockWs();
+      connect(wsService, wss, ws2);
+      expect(wsService.frontendConnection).toBe(ws2);
+
+      ws.emit('close'); // 旧连接关闭
+      expect(wsService.frontendConnection).toBe(ws2);
+
+      ws2.emit('close'); // 当前连接关闭才清空
+      expect(wsService.frontendConnection).toBeNull();
+    });
+
+    test('游戏进行中新连接应自动收到当前游戏状态', () => {
+      createAndStartGame();
+
+      const ws2 = createMockWs();
+      connect(wsService, wss, ws2);
+
+      const stateMsg = ws2.sent.find(m => m.type === 'gameState');
+      expect(stateMsg).toBeDefined();
+      expect(stateMsg.gameState.state).toBe('preflop');
+    });
+
+    test('心跳应检测pong响应，未响应时终止连接', () => {
+      // 第一轮：标记isAlive=false并发送ping
+      jest.advanceTimersByTime(30000);
+      expect(ws.ping).toHaveBeenCalledTimes(1);
+      expect(ws.isAlive).toBe(false);
+
+      // 模拟收到pong
+      ws.emit('pong');
+      expect(ws.isAlive).toBe(true);
+
+      // 第二轮正常ping
+      jest.advanceTimersByTime(30000);
+      expect(ws.ping).toHaveBeenCalledTimes(2);
+
+      // 不再回应pong：第三轮应终止连接
+      jest.advanceTimersByTime(30000);
+      expect(ws.terminate).toHaveBeenCalled();
+    });
   });
 
-  test('应正确处理加入游戏消息', async () => {
-    const gameState = { 
-      id: 'game1', 
-      players: [
-        { id: 'player1', name: 'Player 1' },
-        { id: 'player2', name: 'Player 2' }
-      ] 
-    };
-    mockGameController.getGameState.mockResolvedValue(gameState);
+  describe('消息校验', () => {
+    test('无效JSON应返回错误', () => {
+      ws.emit('message', 'not valid json');
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('消息格式不正确'))).toBe(true);
+    });
 
-    await messageCallback(JSON.stringify({
-      type: 'join',
-      payload: { playerId: 'player1', gameId: 'game1' }
-    }));
+    test('未知消息类型应返回错误', () => {
+      ws.emit('message', JSON.stringify({ type: 'bogusType' }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('bogusType'))).toBe(true);
+    });
 
-    expect(wsService.clients.get('player1')).toBe(mockWs);
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"gameState"')
-    );
+    test('缺少type字段应返回错误', () => {
+      ws.emit('message', JSON.stringify({ foo: 'bar' }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('type'))).toBe(true);
+    });
+
+    test('playerAction缺少必要字段或金额非法应被拒绝', () => {
+      createAndStartGame();
+
+      ws.emit('message', JSON.stringify({ type: 'playerAction', action: 'call' }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('playerId'))).toBe(true);
+
+      ws.emit('message', JSON.stringify({ type: 'playerAction', playerId: 'p1', action: 'steal' }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('action无效'))).toBe(true);
+
+      ws.emit('message', JSON.stringify({ type: 'playerAction', playerId: 'p1', action: 'raise', amount: 'lots' }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('非负整数'))).toBe(true);
+    });
+
+    test('startGame缺少gameId应返回错误', () => {
+      ws.emit('message', JSON.stringify({ type: 'startGame' }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('gameId'))).toBe(true);
+    });
   });
 
-  test('应正确处理加入游戏失败', async () => {
-    mockGameController.getGameState.mockRejectedValue(new Error('Game not found'));
+  describe('游戏创建与开始', () => {
+    test('createGame应创建游戏并广播gameCreated（不含牌堆）', () => {
+      ws.emit('message', JSON.stringify({ type: 'createGame', players: testPlayers }));
 
-    await messageCallback(JSON.stringify({
-      type: 'join',
-      payload: { playerId: 'player1', gameId: 'invalid-game' }
-    }));
+      const created = ws.sent.find(m => m.type === 'gameCreated');
+      expect(created).toBeDefined();
+      expect(created.gameState.players).toHaveLength(3);
+      expect(created.gameState.deck).toBeUndefined();
+      expect(created.gameState.smallBlind).toBe(config.SMALL_BLIND);
+      expect(created.gameState.bigBlind).toBe(config.BIG_BLIND);
+      // model字段应被映射为aiModel
+      expect(created.gameState.players.find(p => p.id === 'p1').aiModel).toBe('Claude');
+      expect(created.gameState.players.find(p => p.id === 'p2').aiModel).toBe('ChatGPT-4O');
+    });
 
-    expect(wsService.clients.get('player1')).toBeUndefined();
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"error"')
-    );
+    test('startGame成功后应广播gameStarted，观战视角保留所有手牌但不含牌堆', () => {
+      createAndStartGame();
+
+      const started = ws.sent.find(m => m.type === 'gameStarted');
+      expect(started).toBeDefined();
+      expect(started.gameState.state).toBe('preflop');
+      expect(started.gameState.deck).toBeUndefined();
+      // 前端是观战UI：所有玩家手牌都应可见
+      started.gameState.players.forEach(p => {
+        expect(p.cards).toHaveLength(2);
+      });
+    });
+
+    test('startGame引擎报错时应发送错误消息而不是伪造游戏状态', () => {
+      ws.emit('message', JSON.stringify({ type: 'startGame', gameId: 'no-such-game' }));
+
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('开始游戏失败'))).toBe(true);
+      expect(ws.sent.some(m => m.type === 'gameStarted')).toBe(false);
+      expect(wsService.isGameRunning).toBe(false);
+    });
   });
 
-  test('应正确处理玩家不在游戏中的情况', async () => {
-    const gameState = { 
-      id: 'game1', 
-      players: [
-        { id: 'player2', name: 'Player 2' },
-        { id: 'player3', name: 'Player 3' }
-      ] 
-    };
-    mockGameController.getGameState.mockResolvedValue(gameState);
+  describe('AI决策', () => {
+    test('发送给AI服务的游戏视图只包含行动玩家自己的手牌且不含牌堆', async () => {
+      aiService.getDecision.mockResolvedValue({ action: 'fold', amount: 0, thinking: '测试思考' });
+      createAndStartGame();
 
-    await messageCallback(JSON.stringify({
-      type: 'join',
-      payload: { playerId: 'player1', gameId: 'game1' }
-    }));
+      const actingPlayer = wsService.currentGameState.players[wsService.currentGameState.currentPlayerIndex];
+      await wsService.handleNextStep();
 
-    expect(wsService.clients.get('player1')).toBeUndefined();
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"error"')
-    );
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('Player not in game')
-    );
+      expect(aiService.getDecision).toHaveBeenCalledTimes(1);
+      const view = aiService.getDecision.mock.calls[0][1];
+
+      expect(view.deck).toBeUndefined();
+      expect(view.pot).toBeDefined();
+      expect(view.currentBet).toBeDefined();
+      expect(view.communityCards).toBeDefined();
+      expect(view.actionHistory).toBeDefined();
+
+      // 行动玩家能看到自己的手牌，其他玩家的手牌为空
+      view.players.forEach(p => {
+        if (p.id === actingPlayer.id) {
+          expect(p.cards).toHaveLength(2);
+        } else {
+          expect(p.cards).toHaveLength(0);
+        }
+      });
+    });
+
+    test('AI返回无效动作时应被替换为合法动作', async () => {
+      aiService.getDecision.mockResolvedValue({ action: 'cheat', amount: 0, thinking: 'x' });
+      createAndStartGame();
+
+      const actingPlayer = wsService.currentGameState.players[wsService.currentGameState.currentPlayerIndex];
+      await wsService.handleNextStep();
+
+      const processed = ws.sent.find(m => m.type === 'playerActionProcessed');
+      expect(processed).toBeDefined();
+      expect(processed.playerId).toBe(actingPlayer.id);
+      expect(['check', 'call', 'fold']).toContain(processed.action);
+      expect(actingPlayer.hasActed).toBe(true);
+    });
+
+    test('AI服务出错时应执行默认动作而不是卡住', async () => {
+      aiService.getDecision.mockRejectedValue(new Error('AI服务不可用'));
+      createAndStartGame();
+
+      await wsService.handleNextStep();
+
+      expect(ws.sent.some(m => m.type === 'aiAgentError')).toBe(true);
+      expect(ws.sent.some(m => m.type === 'playerActionProcessed')).toBe(true);
+    });
+
+    test('gameStageChanged应在阶段真正变化时携带正确的新旧阶段', async () => {
+      // 三家依次call/check后进入flop
+      aiService.getDecision.mockImplementation((playerId, view, validActions) => {
+        const action = validActions.includes('check') ? 'check' : 'call';
+        return Promise.resolve({ action, amount: 0, thinking: 'x' });
+      });
+      createAndStartGame();
+
+      await wsService.handleNextStep();
+      await wsService.handleNextStep();
+      await wsService.handleNextStep();
+
+      const stageChanged = ws.sent.find(m => m.type === 'gameStageChanged');
+      expect(stageChanged).toBeDefined();
+      expect(stageChanged.oldStage).toBe('preflop');
+      expect(stageChanged.newStage).toBe('flop');
+    });
   });
 
-  test('应正确处理创建游戏消息', async () => {
-    const newGame = { id: 'game1', players: [{ id: 'player1' }] };
-    mockGameController.createGame.mockResolvedValue(newGame);
+  describe('状态广播', () => {
+    test('gameStateUpdate不应包含牌堆', async () => {
+      aiService.getDecision.mockResolvedValue({ action: 'fold', amount: 0, thinking: 'x' });
+      createAndStartGame();
+      await wsService.handleNextStep();
 
-    await messageCallback(JSON.stringify({
-      type: 'create',
-      payload: { players: [{ id: 'player1' }] }
-    }));
+      const updates = ws.sent.filter(m => m.type === 'gameStateUpdate');
+      expect(updates.length).toBeGreaterThan(0);
+      updates.forEach(update => {
+        expect(update.gameState.deck).toBeUndefined();
+      });
+    });
 
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"gameCreated"')
-    );
+    test('大盲在翻牌前应获得check选项', () => {
+      createAndStartGame();
+      const game = wsService.currentGameState;
+      // 3人桌dealerIndex对应的大盲位
+      const bbIndex = (game.dealerIndex + 2) % game.players.length;
+      const bbPlayer = game.players[bbIndex];
+
+      const validActions = wsService.calculateValidActions(bbPlayer);
+      expect(validActions).toContain('check');
+      expect(validActions).not.toContain('call'); // 无需跟注
+    });
+
+    test('面对下注的玩家不能check', () => {
+      createAndStartGame();
+      const game = wsService.currentGameState;
+      const sbIndex = (game.dealerIndex + 1) % game.players.length;
+      const sbPlayer = game.players[sbIndex];
+
+      const validActions = wsService.calculateValidActions(sbPlayer);
+      expect(validActions).not.toContain('check');
+      expect(validActions).toContain('call');
+      expect(validActions).toContain('raise');
+      expect(validActions).toContain('allin');
+    });
+
+    test('resetGame应清空状态并广播gameReset', () => {
+      createAndStartGame();
+      ws.emit('message', JSON.stringify({ type: 'resetGame' }));
+
+      expect(wsService.isGameRunning).toBe(false);
+      expect(wsService.currentGameState).toBeNull();
+      expect(ws.sent.some(m => m.type === 'gameReset')).toBe(true);
+    });
   });
 
-  test('应正确处理开始游戏消息', async () => {
-    const gameState = { id: 'game1', players: [{ id: 'player1' }] };
-    mockGameController.startGame.mockResolvedValue(gameState);
+  describe('添加玩家', () => {
+    test('addPlayer应补全玩家属性、标记isAI并创建AI代理', async () => {
+      await wsService.handleAddPlayer({ id: 'px', name: 'Claude-X' });
 
-    wsService.clients.set('player1', mockWs);
-    await messageCallback(JSON.stringify({
-      type: 'start',
-      payload: { gameId: 'game1' }
-    }));
+      const added = wsService.currentGameState.players.find(p => p.id === 'px');
+      expect(added).toBeDefined();
+      expect(added.isAI).toBe(true);
+      expect(added.aiModel).toBe('Claude');
+      expect(aiService.createAgent).toHaveBeenCalledWith('px', 'Claude-X', 'anthropic', expect.any(String));
+      expect(ws.sent.some(m => m.type === 'aiAgentCreated' && m.playerId === 'px')).toBe(true);
+    });
 
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"gameState"')
-    );
+    test('addPlayer缺少必要字段应返回错误', () => {
+      ws.emit('message', JSON.stringify({ type: 'addPlayer', player: { foo: 1 } }));
+      expect(ws.sent.some(m => m.type === 'error' && m.message.includes('addPlayer'))).toBe(true);
+    });
   });
-
-  test('应正确处理玩家行动消息', async () => {
-    const gameState = { id: 'game1', players: [{ id: 'player1' }] };
-    mockGameController.handlePlayerAction.mockResolvedValue(gameState);
-
-    wsService.clients.set('player1', mockWs);
-    await messageCallback(JSON.stringify({
-      type: 'action',
-      payload: {
-        gameId: 'game1',
-        playerId: 'player1',
-        action: 'call',
-        amount: 10
-      }
-    }));
-
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"gameState"')
-    );
-  });
-
-  test('应正确处理无效的消息类型', async () => {
-    await messageCallback(JSON.stringify({
-      type: 'invalid',
-      payload: {}
-    }));
-
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"error"')
-    );
-  });
-
-  test('应正确处理无效的JSON消息', async () => {
-    await messageCallback('invalid json');
-
-    expect(mockWs.send).toHaveBeenCalledWith(
-      expect.stringContaining('"type":"error"')
-    );
-  });
-
-  test('应正确处理客户端断开连接', () => {
-    wsService.clients.set('player1', mockWs);
-    closeCallback();
-    expect(wsService.clients.has('player1')).toBe(false);
-  });
-
-  test('应正确创建玩家视图', () => {
-    const game = {
-      id: 'game1',
-      players: [
-        { id: 'player1', cards: ['AS', 'KS'] },
-        { id: 'player2', cards: ['AH', 'KH'] }
-      ]
-    };
-
-    const playerView = wsService.createPlayerView(game, 'player1');
-
-    expect(playerView.players[0].cards).toEqual(['AS', 'KS']);
-    expect(playerView.players[1].cards).toBeNull();
-  });
-}); 
+});
