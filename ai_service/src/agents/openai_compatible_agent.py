@@ -6,7 +6,7 @@ from openai import AuthenticationError, RateLimitError, APIError as OpenAIAPIErr
 from .base_agent import BaseAgent
 from ..exceptions import APIError, DecisionError
 from ..config.agent_config import get_api_base, get_default_model
-from ..prompts.prompt_utils import build_prompt, parse_response
+from ..prompts.prompt_utils import build_prompt, extract_speech, parse_response
 import re
 
 # 设置日志
@@ -149,14 +149,14 @@ class OpenAICompatibleAgent(BaseAgent):
                 # 1. 使用max_completion_tokens而不是max_tokens参数
                 # 2. 不支持temperature参数（只接受默认值1）
                 # 3. 不支持response_format参数
-                kwargs["max_completion_tokens"] = 1000
+                kwargs["max_completion_tokens"] = 2048
             elif self.provider == "perplexity":
                 # Perplexity API不支持response_format参数
-                kwargs["max_tokens"] = 1000
+                kwargs["max_tokens"] = 2048
                 kwargs["temperature"] = self.temperature
             else:
                 # 其他模型的通用处理
-                kwargs["max_tokens"] = 1000
+                kwargs["max_tokens"] = 2048
                 kwargs["temperature"] = self.temperature
                 kwargs["response_format"] = {"type": "json_object"}
 
@@ -179,6 +179,8 @@ class OpenAICompatibleAgent(BaseAgent):
             else:
                 # 使用标准解析逻辑
                 action, amount, thinking = parse_response(response_content, valid_actions, min_bet, max_bet)
+
+            self.last_speech = extract_speech(response_content)
 
             logger.info("决策结果: action=%s, amount=%s", action, amount)
 

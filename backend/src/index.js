@@ -1,11 +1,14 @@
 // 后端主入口文件
 const express = require('express');
 const http = require('http');
+const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const WebSocket = require('ws');
 const { WebSocketService } = require('./services/ws.service');
 const aiService = require('./services/ai.service');
 const logger = require('./utils/logger');
+const config = require('./config');
 require('dotenv').config();
 
 // 创建Express应用
@@ -88,6 +91,47 @@ app.get('/api/agents', async (req, res) => {
     res.status(500).json({ error: error.message || '获取AI代理列表失败' });
   }
 });
+
+// 回放：列出已记录的手牌，按开始时间倒序
+app.get('/api/hands', (req, res) => {
+  let files = [];
+  try {
+    files = fs.readdirSync(config.HANDS_DIR).filter(f => f.endsWith('.json'));
+  } catch (error) {
+    return res.json([]);
+  }
+  const hands = [];
+  for (const f of files) {
+    try {
+      const log = JSON.parse(fs.readFileSync(path.join(config.HANDS_DIR, f), 'utf8'));
+      const name = id => (log.players.find(p => p.id === id) || {}).name || id;
+      hands.push({
+        id: log.id,
+        session: log.session,
+        hand: log.hand,
+        startedAt: log.startedAt,
+        players: log.players.length,
+        winners: ((log.result && log.result.winners) || []).map(w => ({ name: name(w.playerId), amount: w.amount }))
+      });
+    } catch (error) {
+      logger.warn(`无法读取回放文件${f}: ${error.message}`);
+    }
+  }
+  hands.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
+  res.json(hands);
+});
+
+// 回放：读取单手记录
+app.get('/api/hands/:id', (req, res) => {
+  const { id } = req.params;
+  if (!/^[\w-]+$/.test(id)) return res.status(400).json({ error: '无效的手牌ID' });
+  const file = path.join(config.HANDS_DIR, `${id}.json`);
+  if (!fs.existsSync(file)) return res.status(404).json({ error: '找不到这一手' });
+  res.type('application/json').send(fs.readFileSync(file, 'utf8'));
+});
+
+// 回放页面
+app.use('/replay', express.static(path.join(__dirname, '..', 'public', 'replay')));
 
 // 创建HTTP服务器
 const server = http.createServer(app);

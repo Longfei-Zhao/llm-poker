@@ -8,6 +8,7 @@ import re
 from .base_agent import BaseAgent
 from ..exceptions import ConfigError
 from ..config.agent_config import get_default_model
+from ..prompts.prompt_utils import extract_speech
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,7 @@ class LocalLLMAgent(BaseAgent):
             action, amount = self._sanitize_decision(action, amount, valid_actions, min_bet, max_bet)
             logger.info("%s(%s): 决策结果 - 动作: %s, 金额: %s", self.player_id, self.name, action, amount)
 
+            self.last_speech = extract_speech(response)
             return action, amount, response
 
         except Exception as e:

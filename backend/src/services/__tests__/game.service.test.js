@@ -396,4 +396,60 @@ describe('GameService', () => {
       expect(game.players.reduce((sum, p) => sum + p.chips, 0)).toBe(3000);
     });
   });
+  describe('本手结果与位置', () => {
+    test('摊牌后lastHandResult应记录赢家、赢得筹码和牌型', () => {
+      const game = gameService.createGame(createPlayers([1000, 1000]), { dealerIndex: 0 });
+      gameService.startGame(game.id);
+      // 单挑：p1(庄/小盲)拿AA，p2拿72，公共牌不帮p2
+      game.players[0].cards = ['Ah', 'As'];
+      game.players[1].cards = ['7d', '2c'];
+      game.deck = riggedDeck(['Kc', '9h', '4s', '3d', 'Jc']);
+      gameService.handlePlayerAction(game.id, 'player1', 'call');
+      gameService.handlePlayerAction(game.id, 'player2', 'check');
+      for (let street = 0; street < 3; street++) {
+        gameService.handlePlayerAction(game.id, 'player2', 'check');
+        gameService.handlePlayerAction(game.id, 'player1', 'check');
+      }
+
+      expect(game.state).toBe('finished');
+      expect(game.lastHandResult.isShowdown).toBe(true);
+      expect(game.lastHandResult.winners).toEqual([
+        { playerId: 'player1', amount: config.BIG_BLIND * 2, handName: expect.stringContaining('Pair'), handRank: 'Pair' }
+      ]);
+      expect(game.lastHandResult.hands.player2).toBeTruthy();
+    });
+
+    test('其余人弃牌时赢家不亮牌', () => {
+      const game = gameService.createGame(createPlayers([1000, 1000, 1000]), { dealerIndex: 0 });
+      gameService.startGame(game.id);
+      gameService.handlePlayerAction(game.id, 'player1', 'fold');
+      gameService.handlePlayerAction(game.id, 'player2', 'fold');
+
+      expect(game.lastHandResult.isShowdown).toBe(false);
+      expect(game.lastHandResult.winners).toEqual([
+        { playerId: 'player3', amount: config.SMALL_BLIND + config.BIG_BLIND, handName: null, handRank: null }
+      ]);
+    });
+
+    test('进入下一街时清除上一街的动作标签，all-in玩家保留', () => {
+      const game = gameService.createGame(createPlayers([1000, 1000, 1000]), { dealerIndex: 0 });
+      gameService.startGame(game.id);
+      gameService.handlePlayerAction(game.id, 'player1', 'call');
+      gameService.handlePlayerAction(game.id, 'player2', 'call');
+      gameService.handlePlayerAction(game.id, 'player3', 'check');
+
+      expect(game.state).toBe('flop');
+      game.players.forEach(p => expect(p.action).toBeNull());
+    });
+
+    test('6人桌位置应为BTN/SB/BB/UTG/HJ/CO', () => {
+      const names = [0, 1, 2, 3, 4, 5].map(i => gameService.calculateRelativePosition(0, i, 6));
+      expect(names).toEqual(['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO']);
+    });
+
+    test('8人桌位置应为完整的UTG到CO', () => {
+      const names = [3, 4, 5, 6, 7].map(i => gameService.calculateRelativePosition(0, i, 8));
+      expect(names).toEqual(['UTG', 'UTG+1', 'MP', 'HJ', 'CO']);
+    });
+  });
 });

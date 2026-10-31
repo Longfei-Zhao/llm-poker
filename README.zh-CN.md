@@ -35,13 +35,15 @@ flowchart LR
 
 | 提供商 | 默认模型 | API 密钥环境变量 |
 |---|---|---|
-| Anthropic | `claude-3-7-sonnet-20250219` | `ANTHROPIC_API_KEY` |
+| Anthropic | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
 | OpenAI | `gpt-4o` | `OPENAI_API_KEY` |
 | Google | `gemini-2.0-pro-exp-02-05` | `GEMINI_API_KEY` |
 | DeepSeek | `deepseek-chat` | `DEEPSEEK_API_KEY` |
 | 阿里云（通义千问） | `qwen-plus` | `DASHSCOPE_API_KEY` |
 | xAI | `grok-2` | `XAI_API_KEY` |
 | Perplexity | `sonar` | `PPLX_API_KEY` |
+| 月之暗面（Kimi） | `kimi-latest` | `MOONSHOT_API_KEY` |
+| 火山方舟（豆包） | `doubao-seed-1-6-250615` | `ARK_API_KEY` |
 | 本地（`transformers`） | `Qwen/Qwen2.5-32B-Instruct-AWQ` | — |
 
 只需配置你有密钥的提供商，没有密钥的模型无法入座但不影响其他玩家。模型配置在 `ai_service/src/config/agent_config.py`。
@@ -73,6 +75,20 @@ Windows 下可以用 `./start-services.ps1` 一并启动 AI 服务和后端；�
 
 界面操作：**创建游戏** → **随机入座** → **开始游戏**。模型自动对局，你只需观战。
 
+## 批量跑牌与回放
+
+节目是看回放的，不用一步步点。先启动 AI 服务，然后让这桌 AI 自己打：
+
+```bash
+cd backend
+npm run hands -- --hands 20                         # 可选：--seats claude,grok,kimi --stack 10000 --blinds 50/100
+node src/index.js                                   # 然后打开 http://localhost:3000/replay/
+```
+
+每一手都会写成 `backend/data/hands/<场次>-<手数>.json`：座位、底牌、每个动作，以及模型的**台词**（说出口，后面其他人的 prompt 里能看到）和**心声**（只给观众看，绝不会发给其他玩家）、公共牌和结算。回放页面读这些记录，自己导演每一手：普通台词从底部弹出带立绘的对话框，全下有大招特写，关键时刻弹出带心声的完整对话框并推镜头。支持暂停、2 倍速、按街跳转和连播。
+
+八个角色（名字、人设、提供商、配色）在 `backend/src/config/characters.js`，可用 `MODEL_<ID>` 环境变量（如 `MODEL_CLAUDE`）替换某个角色的模型。人设只决定形象和说话方式，prompt 里明确要求不许影响打法。
+
 ## 一手牌的流程
 
 1. 引擎确定行动玩家并计算合法动作（弃牌 / 过牌 / 跟注 / 加注范围 / 全下）。
@@ -83,8 +99,8 @@ Windows 下可以用 `./start-services.ps1` 一并启动 AI 服务和后端；�
 ## 测试
 
 ```bash
-cd backend && npm test        # 53 个测试——引擎规则（含边池）、筹码守恒、ws 协议
-cd ai_service && pytest tests # 80 个测试——代理（mock SDK）、解析器夹具、API 层
+cd backend && npm test        # 68 个测试——引擎规则（含边池）、筹码守恒、ws 协议、批量跑牌与手牌记录
+cd ai_service && pytest tests # 89 个测试——代理（mock SDK）、解析器夹具、prompt、API 层
 cd frontend && flutter test   # 48 个测试——模型解析、卡牌序列化、玩家合并
 ```
 
@@ -92,8 +108,8 @@ cd frontend && flutter test   # 48 个测试——模型解析、卡牌序列化
 
 ## 路线图
 
-- **排行榜**：AI 服务已按 JSONL 记录每次决策；下一步是脚本化的 N 手锦标赛和各模型胜率 / bb per hand 统计表。
-- 手牌历史导出与回放。
+- 回放用的角色立绘和每个角色的配音。
+- 解说老K 在关键时刻单独调用模型生成解说，以及每手结束后的反应台词。
 - 可配置盲注级别与淘汰赛模式。
 
 ## 许可证

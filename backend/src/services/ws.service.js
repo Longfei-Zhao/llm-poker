@@ -5,10 +5,13 @@
 
 const aiService = require('./ai.service');
 const { GameService } = require('./game.service');
+const { buildPlayerView, sanitizeDecision } = require('./player-view');
 const config = require('../config');
 const logger = require('../utils/logger');
 
 const VALID_PLAYER_ACTIONS = ['fold', 'check', 'call', 'raise', 'allin'];
+// 每次状态更新都会下发思考记录，只保留最近的N条，避免消息体随对局无限增长
+const MAX_THINKING_RECORDS = 100;
 
 class WebSocketService {
   constructor() {
@@ -16,6 +19,7 @@ class WebSocketService {
     this.isGameRunning = false;
     this.currentGameState = null;
     this.gameService = new GameService();
+    this.decisionInFlight = false; // 同一时间只允许一个AI决策请求
   }
 
   initialize(wss) {
@@ -178,6 +182,7 @@ class WebSocketService {
         gameState: this.sanitizeForClient(gameState),
         timestamp: new Date().toISOString()
       });
+      this.sendHandResultIfFinished(gameState);
 
       logger.info(`游戏${gameId}已成功开始，当前阶段: ${gameState.state}`);
     } catch (error) {
@@ -190,6 +195,17 @@ class WebSocketService {
   // 处理游戏下一步
   handleNextStep() {
     if (!this.isGameRunning || !this.currentGameState) {
+      this.sendError('游戏尚未开始');
+      return;
+    }
+
+    // AI还在思考时重复点击"下一步"会对同一玩家发起第二次决策请求
+    if (this.decisionInFlight) {
+      logger.info('AI决策进行中，忽略重复的下一步请求');
+      return;
+    }
+
+    if (this.currentGameState.state === 'waiting') {
       this.sendError('游戏尚未开始');
       return;
     }
@@ -211,25 +227,24 @@ class WebSocketService {
           return;
         }
 
-        // 重新开始游戏，自动发牌
-        setTimeout(() => {
-          try {
-            logger.info('自动开始新一轮发牌');
-            this.gameService.startGame(this.currentGameState.id);
-            const updatedGame = this.gameService.getGameState(this.currentGameState.id);
-            this.updateGameState(updatedGame);
+        // 立即发新一手牌；不能延迟，否则延迟期间的"下一步"会在waiting状态下触发AI决策
+        try {
+          logger.info('自动开始新一轮发牌');
+          this.gameService.startGame(this.currentGameState.id);
+          const updatedGame = this.gameService.getGameState(this.currentGameState.id);
+          this.updateGameState(updatedGame);
 
-            this.sendMessage({
-              type: 'gameStageChanged',
-              oldStage: 'finished',
-              newStage: updatedGame.state,
-              timestamp: new Date().toISOString()
-            });
-          } catch (error) {
-            logger.error('自动开始新一轮失败:', error.message);
-            this.sendError(`自动开始新一轮失败: ${error.message}`);
-          }
-        }, 500);
+          this.sendMessage({
+            type: 'gameStageChanged',
+            oldStage: 'finished',
+            newStage: updatedGame.state,
+            timestamp: new Date().toISOString()
+          });
+          this.sendHandResultIfFinished(updatedGame);
+        } catch (error) {
+          logger.error('自动开始新一轮失败:', error.message);
+          this.sendError(`自动开始新一轮失败: ${error.message}`);
+        }
       } else {
         // 摊牌阶段：结算并进入新一轮
         const updatedGame = this.gameService.moveToNextRound(this.currentGameState);
@@ -270,64 +285,18 @@ class WebSocketService {
 
   // 构建发送给AI服务的游戏视图：只包含该玩家自己的手牌，隐藏他人手牌与牌堆
   buildAIView(actingPlayer) {
-    const game = this.currentGameState;
-    return {
-      id: game.id,
-      gameId: game.gameId || game.id,
-      state: game.state,
-      stage: game.stage || game.state,
-      round: game.round,
-      pot: game.pot,
-      currentBet: game.currentBet,
-      lastRaiseAmount: game.lastRaiseAmount,
-      smallBlind: game.smallBlind,
-      bigBlind: game.bigBlind,
-      dealerIndex: game.dealerIndex,
-      currentPlayerIndex: game.currentPlayerIndex,
-      communityCards: [...(game.communityCards || [])],
-      actionHistory: game.actionHistory || [],
-      players: game.players.map(p => ({
-        id: p.id,
-        name: p.name,
-        aiModel: p.aiModel,
-        position: p.position,
-        chips: p.chips,
-        bet: p.bet,
-        isActive: p.isActive,
-        isCurrent: p.isCurrent,
-        isAllIn: p.isAllIn,
-        hasActed: p.hasActed,
-        action: p.action,
-        cards: p.id === actingPlayer.id ? [...(p.cards || [])] : []
-      }))
-    };
+    return buildPlayerView(this.currentGameState, actingPlayer);
   }
 
   // 处理AI玩家决策
   async processAIDecision(player) {
+    this.decisionInFlight = true;
+    const gameId = this.currentGameState.id;
     try {
       logger.info(`处理AI玩家${player.name}(${player.aiModel})的决策`);
 
-      // 获取有效的动作列表
-      const validActions = this.calculateValidActions(player);
-
-      if (validActions.length === 0) {
-        throw new Error(`没有有效的动作可供玩家${player.name}选择`);
-      }
-
-      // 计算下注范围：最小加注 = 当前注 + max(上次加注增量, 大盲)
-      let minBet;
-      if (this.currentGameState.currentBet === 0) {
-        minBet = this.currentGameState.bigBlind;
-      } else {
-        minBet = this.currentGameState.currentBet
-          + Math.max(this.currentGameState.lastRaiseAmount || 0, this.currentGameState.bigBlind);
-      }
-
-      // 确保最小加注不超过玩家的筹码总量(已下注+剩余筹码)
-      const playerTotalChips = player.bet + player.chips;
-      minBet = Math.min(minBet, playerTotalChips);
-      const maxBet = playerTotalChips;
+      const legal = this.gameService.getLegalActions(this.currentGameState, player);
+      const { validActions, minBet, maxBet } = legal;
 
       logger.info(`有效动作列表: ${validActions.join(', ')}, 下注范围: ${minBet}-${maxBet}`);
 
@@ -350,42 +319,34 @@ class WebSocketService {
 
       logger.info(`AI决策结果: ${decision.action}, 金额: ${decision.amount || 'N/A'}`);
 
+      // 等待期间游戏可能已被重置或重建，过期的决策直接丢弃
+      if (!this.isStillActing(gameId, player.id)) {
+        logger.warn(`玩家${player.name}的决策返回时已不再轮到他行动，丢弃该决策`);
+        return;
+      }
+
       // 创建思考记录
       if (decision.thinking) {
         this.addThinkingRecord(player, decision.thinking, decision.action);
       }
 
-      // 验证决策合法性
-      if (!validActions.includes(decision.action)) {
-        logger.warn(`AI返回的动作${decision.action}不在有效动作列表中，使用默认动作`);
-        // 根据策略选择默认动作：优先check，其次call，最后才fold
-        if (validActions.includes('check')) {
-          decision.action = 'check';
-        } else if (validActions.includes('call')) {
-          decision.action = 'call';
-        } else {
-          decision.action = 'fold';
-        }
+      // 非法动作换成默认动作，加注金额钳制到合法范围
+      const checked = sanitizeDecision(decision, legal);
+      if (checked.corrected) {
+        logger.warn(`AI返回的动作${decision.action}不在有效动作列表中，使用默认动作${checked.action}`);
       }
-
-      // 如果是加注动作，校验金额是合法的整数并落在有效范围内
-      if (decision.action === 'raise') {
-        let amount = Math.floor(Number(decision.amount));
-        if (!Number.isFinite(amount)) {
-          amount = minBet;
-        }
-        if (amount < minBet || amount > maxBet) {
-          logger.warn(`AI返回的加注金额${decision.amount}不在有效范围内，调整到有效值`);
-          amount = Math.max(minBet, Math.min(maxBet, amount));
-        }
-        decision.amount = amount;
-      }
+      decision.action = checked.action;
+      decision.amount = checked.amount;
 
       // 处理AI决策
       this.handlePlayerAction(player.id, decision.action, decision.action === 'raise' ? decision.amount : 0);
 
     } catch (error) {
       logger.error('处理AI决策出错:', error.message);
+
+      if (!this.isStillActing(gameId, player.id)) {
+        return;
+      }
 
       // 发送错误消息到前端
       this.sendMessage({
@@ -407,7 +368,27 @@ class WebSocketService {
 
       // 执行默认动作
       this.handlePlayerAction(player.id, defaultAction, 0);
+    } finally {
+      this.decisionInFlight = false;
     }
+  }
+
+  // 判断某玩家是否仍是指定游戏中当前该行动的人
+  isStillActing(gameId, playerId) {
+    const game = this.currentGameState;
+    if (!game || game.id !== gameId) return false;
+    const current = game.players[game.currentPlayerIndex];
+    return !!current && current.id === playerId && current.isCurrent;
+  }
+
+  // 一手牌刚结束时单独推送结果（赢家、牌型），前端据此只提示一次
+  sendHandResultIfFinished(game) {
+    if (!game || game.state !== 'finished' || !game.lastHandResult) return;
+    this.sendMessage({
+      type: 'handResult',
+      result: game.lastHandResult,
+      timestamp: new Date().toISOString()
+    });
   }
 
   // 创建思考记录并添加到游戏状态
@@ -432,6 +413,11 @@ class WebSocketService {
 
     // 添加记录
     this.currentGameState.thinkingHistory.push(thinkingRecord);
+    if (this.currentGameState.thinkingHistory.length > MAX_THINKING_RECORDS) {
+      this.currentGameState.thinkingHistory.splice(
+        0, this.currentGameState.thinkingHistory.length - MAX_THINKING_RECORDS
+      );
+    }
 
     // 发送思考记录更新
     this.sendMessage({
@@ -446,42 +432,7 @@ class WebSocketService {
 
   // 计算玩家可用的动作列表
   calculateValidActions(player) {
-    const game = this.currentGameState;
-    const validActions = [];
-    const toCall = game.currentBet - player.bet;
-
-    // 基本上，玩家总是可以弃牌
-    validActions.push('fold');
-
-    // 下注已对齐（含大盲preflop无人加注的情况）时可以check
-    if (toCall <= 0) {
-      validActions.push('check');
-    }
-
-    // 如果玩家有筹码，总是可以全押
-    if (player.chips > 0) {
-      validActions.push('allin');
-    }
-
-    // 有需要跟的注且筹码足够时可以call
-    if (toCall > 0 && toCall <= player.chips) {
-      validActions.push('call');
-    }
-
-    // 计算最小加注额：当前注 + max(上次加注增量, 大盲)
-    let minRaiseBet;
-    if (game.currentBet === 0) {
-      minRaiseBet = game.bigBlind;
-    } else {
-      minRaiseBet = game.currentBet + Math.max(game.lastRaiseAmount || 0, game.bigBlind);
-    }
-
-    // 如果玩家有足够的筹码进行最小加注，可以raise
-    if (player.chips > 0 && player.chips + player.bet >= minRaiseBet && minRaiseBet > game.currentBet) {
-      validActions.push('raise');
-    }
-
-    return validActions;
+    return this.gameService.getLegalActions(this.currentGameState, player).validActions;
   }
 
   // 发送更新的游戏状态
@@ -549,6 +500,7 @@ class WebSocketService {
           newStage: updatedGame.state,
           timestamp: new Date().toISOString()
         });
+        this.sendHandResultIfFinished(updatedGame);
       }
 
       if (updatedGame.state === 'showdown' || updatedGame.state === 'finished') {
@@ -587,6 +539,7 @@ class WebSocketService {
               amount: 0,
               timestamp: new Date().toISOString()
             });
+            this.sendHandResultIfFinished(updatedGame);
 
             return; // 成功处理，不发送错误消息
           } catch (fallbackError) {
@@ -630,6 +583,13 @@ class WebSocketService {
   sanitizeForClient(gameState) {
     if (!gameState) return gameState;
     const { deck, ...clientState } = gameState;
+    // 前端靠isDealer画庄家按钮，dealerIndex是数组下标，前端无法自己从座位号推出来
+    if (Array.isArray(clientState.players)) {
+      clientState.players = clientState.players.map((p, index) => ({
+        ...p,
+        isDealer: index === clientState.dealerIndex
+      }));
+    }
     return clientState;
   }
 

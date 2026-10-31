@@ -14,6 +14,9 @@ class BaseAgent(ABC):
     # 提供商标识，子类在__init__中覆盖
     provider: str = "unknown"
 
+    # 最近一次决策里说出口的台词，由各代理在make_decision中设置
+    last_speech: Optional[str] = None
+
     def __init__(self, player_id: str, name: str):
         """
         初始化代理。

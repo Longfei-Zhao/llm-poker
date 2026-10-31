@@ -24,3 +24,6 @@ frontend/.flutter-plugins-dependencies
 .idea/
 *.log
 test_results/
+
+# Recorded hands for replay
+backend/data/

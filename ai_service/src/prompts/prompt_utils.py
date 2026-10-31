@@ -25,41 +25,31 @@ def choose_default_action(valid_actions: List[str]) -> str:
     # 如果上面都没有，返回第一个有效动作
     return valid_actions[0] if valid_actions else 'fold'
 
-def get_position_name(position: int, dealer_index: int, total_players: int) -> str:
-    """获取玩家相对位置名称
+def get_position_name(seat_index: int, dealer_index: int, total_players: int) -> str:
+    """获取玩家相对位置名称，规则与后端引擎的calculateRelativePosition一致
 
     Args:
-        position: 玩家位置（从1开始）
-        dealer_index: 庄家位置索引（从0开始）
+        seat_index: 玩家在players数组中的下标（从0开始）
+        dealer_index: 庄家在players数组中的下标（从0开始）
         total_players: 玩家总数
 
     Returns:
         str: 位置名称（BTN、SB、BB等）
     """
-    # 计算相对位置（相对于庄家）
-    relativePos = (position - 1 - dealer_index + total_players) % total_players
+    relative_pos = (seat_index - dealer_index + total_players) % total_players
 
-    # 位置映射
-    positionNames = {
-        0: "BTN", # 庄家/按钮位
-        1: "SB",  # 小盲
-        2: "BB",  # 大盲
-    }
+    # 单挑：庄家兼小盲，另一位是大盲
+    if total_players == 2:
+        return "BTN" if relative_pos == 0 else "BB"
 
-    # 根据玩家数量动态计算其他位置
-    if total_players <= 3:
-        return positionNames.get(relativePos, f"P{relativePos}")
-    else:
-        if relativePos >= 3:
-            # 3人以上桌子的其他位置
-            positions = ["UTG", "UTG+1", "MP", "HJ", "CO"]
-            index = relativePos - 3
-            if index < len(positions):
-                return positions[index]
-            else:
-                return f"P{relativePos}"
-        else:
-            return positionNames.get(relativePos, f"P{relativePos}")
+    if relative_pos <= 2:
+        return ("BTN", "SB", "BB")[relative_pos]
+    # 盲注后第一位总是UTG，其余位置从按钮往前倒数
+    if relative_pos == 3:
+        return "UTG"
+    from_button = total_players - relative_pos
+    names = ("CO", "HJ", "MP", "UTG+1")
+    return names[from_button - 1] if from_button <= len(names) else f"P{relative_pos}"
 
 def format_game_state(game_state: Dict, player_id: str) -> str:
     """格式化游戏状态
@@ -74,30 +64,31 @@ def format_game_state(game_state: Dict, player_id: str) -> str:
     Raises:
         ValueError: 在游戏状态中找不到当前玩家
     """
+    players = game_state["players"]
+
     # 获取当前玩家
-    current_player = next(
-        (p for p in game_state["players"] if p["id"] == player_id),
+    current_index = next(
+        (i for i, p in enumerate(players) if p["id"] == player_id),
         None
     )
-    if not current_player:
+    if current_index is None:
         raise ValueError("在游戏状态中找不到当前玩家")
+    current_player = players[current_index]
 
-    # 获取其他玩家
+    # 获取总玩家数和庄家索引；dealerIndex是players数组下标，位置必须按数组下标算，
+    # 不能用座位号position（有人淘汰或座位不连续时两者对不上）
+    total_players = len(players)
+    dealer_index = game_state["dealerIndex"]
+    dealer_name = players[dealer_index]["name"] if 0 <= dealer_index < total_players else "unknown"
+
+    # 获取其他玩家（保留数组下标用于计算位置）
     other_players = [
-        p for p in game_state["players"]
+        (i, p) for i, p in enumerate(players)
         if p["id"] != player_id and p["isActive"]
     ]
 
-    # 获取总玩家数和庄家索引
-    total_players = len(game_state["players"])
-    dealer_index = game_state["dealerIndex"]
-
     # 获取当前玩家的位置名称
-    current_position_name = get_position_name(
-        current_player["position"],
-        dealer_index,
-        total_players
-    )
+    current_position_name = get_position_name(current_index, dealer_index, total_players)
 
     # 格式化玩家手牌为可读格式
     readable_hand = format_hand_readable(current_player['cards'])
@@ -112,33 +103,29 @@ small blind: {game_state['smallBlind']}
 big blind: {game_state['bigBlind']}
 pot: {game_state['pot']}
 current bet: {game_state['currentBet']}
-button position: {game_state['dealerIndex'] + 1}
+button: {dealer_name}
 
 your information:
 - name: {current_player['name']}
 - chips: {current_player['chips']}
 - bet: {current_player['bet']}
 - hand: {readable_hand}
-- position: {current_player['position']} ({current_position_name})
+- position: {current_position_name}
 
 community cards: {readable_community_cards}
 
 other players:
 """
 
-    for player in other_players:
-        # 获取该玩家的位置名称
-        position_name = get_position_name(
-            player["position"],
-            dealer_index,
-            total_players
-        )
+    for index, player in other_players:
+        position_name = get_position_name(index, dealer_index, total_players)
+        all_in_note = " (ALL-IN)" if player.get("isAllIn") else ""
 
         description += f"""
 - name: {player['name']}
-- chips: {player['chips']}
+- chips: {player['chips']}{all_in_note}
 - bet: {player['bet']}
-- position: {player['position']} ({position_name})
+- position: {position_name}
 """
 
     return description
@@ -215,6 +202,26 @@ def format_action_history(game_state: Dict) -> str:
 
     return history_description
 
+def format_table_talk(game_state: Dict) -> str:
+    """格式化本手牌里其他玩家说出口的台词（心声不会出现在这里）
+
+    Args:
+        game_state: 游戏状态字典
+
+    Returns:
+        str: 台词记录描述
+    """
+    talk = game_state.get("tableTalk") or []
+    if not talk:
+        return "table talk this hand: none"
+
+    stage_names = {"preflop": "Pre-Flop", "flop": "Flop", "turn": "Turn", "river": "River"}
+    lines = ["table talk this hand (said out loud, everyone heard it):"]
+    for item in talk:
+        stage = stage_names.get(item.get("stage", ""), item.get("stage", ""))
+        lines.append(f'- {item.get("name", "?")} ({stage}): "{item.get("speech", "")}"')
+    return "\n".join(lines)
+
 def build_prompt(
     game_state: Dict,
     player_id: str,
@@ -238,16 +245,29 @@ def build_prompt(
 
     # 构建行动历史描述
     action_history_description = format_action_history(game_state)
+    table_talk_description = format_table_talk(game_state)
+
+    player_count = len(game_state["players"])
+
+    # 人设只影响说话方式，不影响打法
+    persona = game_state.get("persona")
+    persona_description = f"""
+your character at this table:
+{persona}
+Your character only shapes how you talk. It must not change how you play: make the best poker decision you can.
+""" if persona else ""
 
     prompt = f"""
 You are a professional Texas Hold'em player.
-You are playing in a 8-player Texas Hold'em game.
+You are playing in a {player_count}-player Texas Hold'em game.
 Assess the current situation and decide what kind of action to make.
-
+{persona_description}
 game state:
 {state_description}
 
 {action_history_description}
+
+{table_talk_description}
 
 you can take actions:
 {', '.join(valid_actions)}
@@ -260,7 +280,8 @@ Please note that these are TOTAL bet amounts, not additional amounts. Your curre
 
 Please output your decision in JSON format, as follows:
 {{
-  "thinking": "record your thinking process in Chinese",
+  "thinking": "your private inner monologue, in Chinese, first person, under 150 characters",
+  "speech": "what you say out loud at the table, in Chinese, under 40 characters, or an empty string",
   "action": "fold|check|call|raise|allin",
   "amount": number (only when action is raise)
 }}
@@ -269,7 +290,8 @@ Note:
 1. Only choose the given valid actions
 2. If 'check' is available in your valid actions, you should prefer it over 'fold'
 3. If you choose raise, the amount must be in the range of min and max bet
-4. Must output valid JSON format, and include detailed thinking process
+4. Must output valid JSON format
+5. "thinking" is private: no other player ever sees it. "speech" is heard by everyone at the table, so it can be trash talk, table banter or a bluff, and it never has to match your real hand
 """
 
     # 完整提示词包含手牌信息，只在DEBUG级别输出
@@ -302,10 +324,15 @@ def _extract_json(response_text: str) -> Optional[Dict]:
         if len(parts) > 1:
             candidates.append(parts[1].strip())
     candidates.append(response_text)
+    # 模型常在JSON前后加说明文字，取第一个{到最后一个}之间的部分再试一次
+    start, end = response_text.find("{"), response_text.rfind("}")
+    if 0 <= start < end:
+        candidates.append(response_text[start:end + 1])
 
     for candidate in candidates:
         try:
-            data = json.loads(candidate)
+            # strict=False允许字符串里出现未转义的换行，模型写中文长思考时经常这样输出
+            data = json.loads(candidate, strict=False)
             if isinstance(data, dict):
                 return data
         except json.JSONDecodeError:
@@ -325,9 +352,11 @@ def _extract_action_from_text(response_text: str, valid_actions: Optional[List[s
     ]
 
     for pattern in action_patterns:
-        action_match = re.search(pattern, response_text, re.IGNORECASE)
-        if not action_match:
+        # 取最后一次匹配：思考里会先复述对手动作（"对手加注了"），最终决定一般在末尾
+        matches = list(re.finditer(pattern, response_text, re.IGNORECASE))
+        if not matches:
             continue
+        action_match = matches[-1]
 
         # 取最后一个成功匹配的捕获组
         action = action_match.group(action_match.lastindex).lower()
@@ -406,6 +435,23 @@ def _clean_thinking(thinking: str) -> str:
     # 移除单独的{}行
     thinking = re.sub(r'^\s*[\{\}]\s*$', '', thinking, flags=re.MULTILINE)
     return thinking.strip()
+
+def extract_speech(response_text: str, max_len: int = 80) -> Optional[str]:
+    """从LLM响应中提取说出口的台词，没有则返回None"""
+    if not response_text:
+        return None
+    speech = None
+    data = _extract_json(response_text)
+    if data is not None and isinstance(data.get("speech"), str):
+        speech = data["speech"]
+    else:
+        match = re.search(r'"speech"\s*:\s*"([^"]*)"', response_text)
+        if match:
+            speech = match.group(1)
+    if speech is None:
+        return None
+    speech = speech.strip()
+    return speech[:max_len] or None
 
 def parse_response(response_text: str, valid_actions=None, min_bet=None, max_bet=None) -> Tuple[str, Optional[int], Optional[str]]:
     """

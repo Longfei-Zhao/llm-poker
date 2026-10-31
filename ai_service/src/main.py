@@ -100,10 +100,11 @@ class DecisionRequest(BaseModel):
     max_bet: int
 
 class DecisionResponse(BaseModel):
-    """决策响应"""
+    """决策响应：thinking是心声（只给观众看），speech是说出口的台词"""
     action: str
     amount: Optional[int] = None
     thinking: Optional[str] = None
+    speech: Optional[str] = None
 
 class AgentInfo(BaseModel):
     """代理信息响应模型"""
@@ -177,6 +178,7 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
         raise PlayerError(f"找不到玩家{request.player_id}的AI代理")
 
     # 获取决策
+    agent.last_speech = None
     start_time = time.time()
     action, amount, thinking = await agent.make_decision(
         game_state=request.game_state,
@@ -185,6 +187,7 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
         max_bet=request.max_bet
     )
     latency_ms = int((time.time() - start_time) * 1000)
+    speech = getattr(agent, "last_speech", None)
 
     # 输出结构化决策日志（JSONL），用于后续对局数据分析
     decision_logger.info(json.dumps({
@@ -195,9 +198,10 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
         "action": action,
         "amount": amount,
         "latency_ms": latency_ms,
+        "speech": speech,
     }, ensure_ascii=False))
 
-    return DecisionResponse(action=action, amount=amount, thinking=thinking)
+    return DecisionResponse(action=action, amount=amount, thinking=thinking, speech=speech)
 
 @app.delete("/api/agents/{player_id}")
 async def delete_agent(player_id: str):

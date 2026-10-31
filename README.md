@@ -35,16 +35,18 @@ flowchart LR
 
 | Provider | Default model | API key env var |
 |---|---|---|
-| Anthropic | `claude-3-7-sonnet-20250219` | `ANTHROPIC_API_KEY` |
+| Anthropic | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
 | OpenAI | `gpt-4o` | `OPENAI_API_KEY` |
 | Google | `gemini-2.0-pro-exp-02-05` | `GEMINI_API_KEY` |
 | DeepSeek | `deepseek-chat` | `DEEPSEEK_API_KEY` |
 | Alibaba (Qwen) | `qwen-plus` | `DASHSCOPE_API_KEY` |
 | xAI | `grok-2` | `XAI_API_KEY` |
 | Perplexity | `sonar` | `PPLX_API_KEY` |
+| Moonshot (Kimi) | `kimi-latest` | `MOONSHOT_API_KEY` |
+| Volcengine Ark (Doubao) | `doubao-seed-1-6-250615` | `ARK_API_KEY` |
 | Local (`transformers`) | `Qwen/Qwen2.5-32B-Instruct-AWQ` | — |
 
-Only the providers you have keys for need to be configured; the rest simply can't be seated. Models are configured in `ai_service/src/config/agent_config.py`.
+Only the providers you have keys for need to be configured; the rest simply can't be seated. Provider defaults live in `ai_service/src/config/agent_config.py`; the eight table characters (name, persona, provider, colour) live in `backend/src/config/characters.js`, and `MODEL_<ID>` env vars (e.g. `MODEL_CLAUDE`) override a character's model.
 
 ## Quickstart
 
@@ -73,6 +75,20 @@ On Windows, `./start-services.ps1` starts the AI service and backend together; t
 
 In the UI: **创建游戏** (create game) → **随机入座** (seat models randomly) → **开始游戏** (start). The models play on their own; you watch.
 
+## Batch runs and replay
+
+The show is watched as replays, not clicked through live. Start the AI service, then let the table play on its own:
+
+```bash
+cd backend
+npm run hands -- --hands 20                         # optional: --seats claude,grok,kimi --stack 10000 --blinds 50/100
+node src/index.js                                   # then open http://localhost:3000/replay/
+```
+
+Every hand is written to `backend/data/hands/<session>-<n>.json`: seats, hole cards, each action with the model's **speech** (said out loud, other players hear it in later prompts) and **inner monologue** (audience only, never shown to other players), the board, and the payout. The replay page reads these logs and directs each hand on its own: quick lines pop up in a bottom dialogue box with the character's portrait, all-ins get a cut-in, and big moments get the full box with the inner monologue and a camera push. It can pause, play at 2×, jump to a street, and play hands back to back.
+
+Personas only shape how a character looks and talks; the prompt tells the model they must not change how it plays.
+
 ## How a hand works
 
 1. The engine determines whose turn it is and computes the legal actions (fold / check / call / raise bounds / all-in).
@@ -83,8 +99,8 @@ In the UI: **创建游戏** (create game) → **随机入座** (seat models rand
 ## Testing
 
 ```bash
-cd backend && npm test        # 53 tests — engine rules incl. side pots, chip conservation, ws protocol
-cd ai_service && pytest tests # 80 tests — agents (mocked SDKs), parser fixtures, API layer
+cd backend && npm test        # 68 tests — engine rules incl. side pots, chip conservation, ws protocol, batch runner + hand logs
+cd ai_service && pytest tests # 89 tests — agents (mocked SDKs), parser fixtures, prompts, API layer
 cd frontend && flutter test   # 48 tests — model parsing, card round-trips, player merging
 ```
 
@@ -92,8 +108,8 @@ All three suites run in CI on every push.
 
 ## Roadmap
 
-- **Leaderboard**: the AI service already logs every decision as JSONL; next step is a scripted N-hand tournament and a win-rate / bb-per-hand table per model.
-- Hand-history export and replay.
+- Character portraits and per-character TTS voices for the replay.
+- The commentator (老K) as its own model call at key moments, plus post-hand reaction lines.
 - Configurable table stakes and tournament (elimination) mode.
 
 ## License

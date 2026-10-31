@@ -245,6 +245,25 @@ socket.send(JSON.stringify({
 }
 ```
 
+`gameState.players[]` 中每个玩家带 `isDealer` 标记。`thinkingHistory` 只保留最近 100 条。
+
+##### 本手结果
+一手牌结束时推送一次。`isShowdown` 为 false 表示其余人弃牌，此时赢家不亮牌，`handName` 为 null。同样的数据也保存在状态的 `lastHandResult` 字段里，直到下一手开始。
+```json
+{
+  "type": "handResult",
+  "result": {
+    "round": 3,
+    "isShowdown": true,
+    "winners": [
+      { "playerId": "player1", "amount": 240, "handName": "Pair, A's" }
+    ],
+    "hands": { "player1": "Pair, A's", "player2": "A High" }
+  },
+  "timestamp": "2023-06-01T12:06:30.000Z"
+}
+```
+
 ##### 错误消息
 ```json
 {
@@ -253,6 +272,34 @@ socket.send(JSON.stringify({
   "timestamp": "2023-06-01T12:07:00.000Z"
 }
 ```
+
+### 1.3 回放API
+
+#### 手牌列表
+`GET /api/hands` 返回已记录的手牌摘要，按开始时间倒序：
+```json
+[{ "id": "20261101120000-003", "session": "20261101120000", "hand": 3, "startedAt": "2026-11-01T12:03:10.000Z", "players": 8, "winners": [{ "name": "狂客", "amount": 14700 }] }]
+```
+
+#### 单手记录
+`GET /api/hands/:id` 返回一手牌的完整记录（由 `npm run hands` 写入 `backend/data/hands/`）：
+```json
+{
+  "id": "20261101120000-003", "hand": 3, "blinds": [50, 100], "button": "kimi",
+  "players": [{ "id": "grok", "name": "狂客", "label": "Grok", "color": "#FF2E7E", "look": "grok", "stack": 6750, "cards": ["Qs", "Qd"] }],
+  "events": [
+    { "t": "blinds", "sb": { "p": "claude", "amount": 50 }, "bb": { "p": "deepseek", "amount": 100 } },
+    { "t": "act", "p": "grok", "street": "river", "a": "allin", "to": 5850, "allIn": true, "sp": "就这？", "in": "葫芦，我越嚣张他们越觉得我在诈唬。" },
+    { "t": "board", "street": "flop", "cards": ["Ks", "Qh", "7d"] },
+    { "t": "result" }
+  ],
+  "result": { "isShowdown": true, "winners": [{ "playerId": "grok", "amount": 14700, "handName": "Full House, Q's over K's", "handRank": "Full House" }], "stacks": { "grok": 14700 } }
+}
+```
+`to` 是该玩家本街累计下注额；`sp` 是台词，`in` 是心声；`corrected` 表示模型的动作不合法或调用失败、已换成默认动作。
+
+#### 回放页面
+`GET /replay/` 读取上面两个接口播放回放；连不上后端时播放内置示例。
 
 ## 2. AI服务API
 
@@ -428,9 +475,12 @@ print(response.json())
 ```json
 {
   "action": "raise",
-  "amount": 50
+  "amount": 50,
+  "thinking": "口袋 Q，这把我要好好演一下。",
+  "speech": "来点刺激的！"
 }
 ```
+`thinking` 是心声，只给观众看；`speech` 是说出口的台词，模型没说话时为 `null`。请求的 `game_state` 里可以带 `persona`（该角色人设）和 `tableTalk`（本手此前的台词列表 `[{name, stage, speech}]`）。
 - **示例**:
 ```python
 import requests

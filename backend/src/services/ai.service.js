@@ -5,7 +5,8 @@ class AIService {
     constructor() {
         this.client = axios.create({
             baseURL: config.AI_SERVICE_URL || 'http://localhost:8000',
-            timeout: 30000 // 30秒超时
+            // AI服务内部单次调用30秒且带重试，后端必须等得比它久，否则会提前放弃并回退成check/fold
+            timeout: config.AI_REQUEST_TIMEOUT_MS
         });
         
         console.log(`AI服务初始化: ${config.AI_SERVICE_URL || 'http://localhost:8000'}`);
@@ -84,11 +85,13 @@ class AIService {
             const amount = response.data.amount !== undefined ? response.data.amount : 0;
             const thinking = response.data.thinking || `AI玩家${playerId}使用${gameState.players.find(p => p.id === playerId)?.aiModel || '未知模型'}思考后选择了${action}`;
             
-            // 返回思考过程和决策结果
+            // 返回思考过程和决策结果；inner是模型原始心声（可能为空），speech是说出口的台词
             return {
                 action,
                 amount,
-                thinking
+                thinking,
+                inner: response.data.thinking || null,
+                speech: response.data.speech || null
             };
         } catch (error) {
             console.error('获取AI决策失败:', error.message);

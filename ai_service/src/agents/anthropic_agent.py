@@ -4,7 +4,7 @@ import logging
 from .base_agent import BaseAgent
 from ..exceptions import APIError, DecisionError
 from ..config.agent_config import get_default_model
-from ..prompts.prompt_utils import build_prompt, parse_response
+from ..prompts.prompt_utils import build_prompt, extract_speech, parse_response
 
 # 设置日志
 logger = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ class AnthropicAgent(BaseAgent):
             # 异步调用Anthropic API
             response = await self.client.messages.create(
                 model=self.model,
-                max_tokens=1000,
+                max_tokens=2048,
                 temperature=self.temperature,
                 messages=[
                     {"role": "user", "content": prompt}
@@ -98,6 +98,7 @@ class AnthropicAgent(BaseAgent):
 
             # 解析响应内容
             action, amount, thinking = parse_response(response_content, valid_actions, min_bet, max_bet)
+            self.last_speech = extract_speech(response_content)
             logger.info("决策结果: action=%s, amount=%s", action, amount)
 
             # 验证决策，无效时回退为默认动作

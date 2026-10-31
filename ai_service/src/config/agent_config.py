@@ -15,7 +15,7 @@ class ProviderConfig(BaseModel):
 # 提供商配置表
 PROVIDERS: Dict[str, ProviderConfig] = {
     "anthropic": ProviderConfig(
-        default_model="claude-3-7-sonnet-20250219",
+        default_model="claude-sonnet-5-5",
         api_key_env="ANTHROPIC_API_KEY",
     ),
     "openai": ProviderConfig(
@@ -53,6 +53,19 @@ PROVIDERS: Dict[str, ProviderConfig] = {
         api_base="https://api.perplexity.ai",
         openai_compatible=True,
     ),
+    "moonshot": ProviderConfig(
+        default_model="kimi-latest",
+        api_key_env="MOONSHOT_API_KEY",
+        api_base="https://api.moonshot.cn/v1",
+        openai_compatible=True,
+    ),
+    # 火山方舟（豆包）：模型名要用方舟控制台里开通的模型或接入点ID，可在请求的model里指定
+    "doubao": ProviderConfig(
+        default_model="doubao-seed-1-6-250615",
+        api_key_env="ARK_API_KEY",
+        api_base="https://ark.cn-beijing.volces.com/api/v3",
+        openai_compatible=True,
+    ),
     "local": ProviderConfig(
         default_model="Qwen/Qwen2.5-32B-Instruct-AWQ",
         api_key_env=None,
@@ -62,6 +75,7 @@ PROVIDERS: Dict[str, ProviderConfig] = {
 # 提供商别名映射（支持多种名称指向同一提供商）
 PROVIDER_ALIASES: Dict[str, str] = {
     "google": "gemini",  # Google的Gemini模型
+    "kimi": "moonshot",
 }
 
 # 反向别名映射（用于显示）

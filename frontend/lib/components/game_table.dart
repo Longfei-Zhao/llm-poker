@@ -354,7 +354,8 @@ class _GameTableState extends State<GameTable> {
       case 'raise':
         return '加注到 ${player.bet}';
       case 'allin':
-        return 'ALL IN ${player.bet}';
+        // all-in玩家在后续街的本街下注为0，不显示金额
+        return player.bet > 0 ? 'ALL IN ${player.bet}' : 'ALL IN';
       default:
         return player.action!;
     }

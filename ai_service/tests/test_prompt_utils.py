@@ -159,3 +159,80 @@ def test_choose_default_action_priority():
     assert choose_default_action(["fold", "raise"]) == "fold"
     assert choose_default_action(["allin"]) == "allin"
     assert choose_default_action([]) == "fold"
+
+# ---------- 数据传输修复 ----------
+
+from src.prompts.prompt_utils import get_position_name, format_game_state, build_prompt
+
+def test_parse_json_with_raw_newlines_in_string():
+    """思考字段里带未转义换行的JSON也应按JSON解析，而不是落到正则"""
+    response = '{"thinking": "对手加注了。\n但我有坚果，跟注太亏", "action": "raise", "amount": 300}'
+    action, amount, thinking = parse_response(response, VALID_ACTIONS, 40, 1000)
+    assert action == "raise"
+    assert amount == 300
+    assert "坚果" in thinking
+
+def test_parse_json_surrounded_by_prose():
+    """JSON前后有说明文字且没有代码块时也应提取出JSON"""
+    response = 'My decision is below.\n{"thinking": "免费看牌", "action": "check"}\nGood luck!'
+    action, amount, thinking = parse_response(response, VALID_ACTIONS, 40, 1000)
+    assert action == "check"
+    assert thinking == "免费看牌"
+
+def test_regex_fallback_uses_last_mentioned_action():
+    """自由文本先复述对手动作，最终决定在末尾，应取最后一次提到的动作"""
+    response = "对手在翻牌圈加注了，我的牌太弱，所以弃牌"
+    action, amount, thinking = parse_response(response, VALID_ACTIONS, 40, 1000)
+    assert action == "fold"
+
+def test_position_names_follow_array_index():
+    assert [get_position_name(i, 0, 6) for i in range(6)] == ["BTN", "SB", "BB", "UTG", "HJ", "CO"]
+    assert [get_position_name(i, 0, 2) for i in range(2)] == ["BTN", "BB"]
+
+def _state(players, dealer_index):
+    return {
+        "smallBlind": 5, "bigBlind": 10, "pot": 15, "currentBet": 10,
+        "dealerIndex": dealer_index, "communityCards": [], "actionHistory": [],
+        "players": players,
+    }
+
+def _player(pid, seat, cards=None):
+    return {"id": pid, "name": pid, "position": seat, "chips": 1000, "bet": 0,
+            "isActive": True, "isAllIn": False, "cards": cards or []}
+
+def test_format_game_state_ignores_seat_numbers():
+    """座位号不连续（有人被淘汰）时，位置仍按数组下标和dealerIndex计算"""
+    players = [_player("A", 2), _player("B", 5, ["Ah", "Kd"]), _player("C", 8)]
+    text = format_game_state(_state(players, 0), "B")
+    assert "button: A" in text
+    assert "- position: SB" in text
+    assert "- position: BB" in text
+
+def test_build_prompt_uses_actual_player_count():
+    players = [_player("A", 1), _player("B", 2, ["Ah", "Kd"]), _player("C", 3)]
+    prompt = build_prompt(_state(players, 0), "B", VALID_ACTIONS, 20, 1000)
+    assert "3-player" in prompt
+    assert "8-player" not in prompt
+
+# ---------- 台词与心声 ----------
+
+from src.prompts.prompt_utils import extract_speech
+
+def test_extract_speech_from_json():
+    response = '{"thinking": "我有葫芦", "speech": "就这？", "action": "allin"}'
+    assert extract_speech(response) == "就这？"
+
+def test_extract_speech_missing_or_empty():
+    assert extract_speech('{"action": "fold"}') is None
+    assert extract_speech('{"speech": "  ", "action": "fold"}') is None
+
+def test_build_prompt_includes_persona_and_table_talk():
+    players = [_player("A", 1), _player("B", 2, ["Ah", "Kd"]), _player("C", 3)]
+    state = _state(players, 0)
+    state["persona"] = "英伦老绅士，说话客气但阴阳怪气。"
+    state["tableTalk"] = [{"name": "C", "stage": "preflop", "speech": "来点刺激的！"}]
+    prompt = build_prompt(state, "B", VALID_ACTIONS, 20, 1000)
+    assert "英伦老绅士" in prompt
+    assert "must not change how you play" in prompt
+    assert '- C (Pre-Flop): "来点刺激的！"' in prompt
+    assert '"speech"' in prompt
