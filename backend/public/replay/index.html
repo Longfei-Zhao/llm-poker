@@ -242,6 +242,11 @@ body { font-family: var(--body); }
 
 /* replay page additions */
 body { margin: 0; }
+/* 渲染成视频时（?render）：只留舞台，铺满整个窗口 */
+body.render .top, body.render .controls, body.render .tl, body.render .durs { display: none !important; }
+body.render .wrap { max-width: none; padding: 0; gap: 0; }
+body.render .vp { border-radius: 0; box-shadow: none; }
+body.render { overflow: hidden; }
 .picker { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .picker select { font: 500 14px var(--body); color: var(--text); background: #0E1020; border: 0; border-radius: 6px; padding: 10px 12px; min-height: 44px; max-width: min(420px, 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2); }
 .picker select:focus-visible { outline: 3px solid var(--hot); outline-offset: 2px; }
@@ -1340,6 +1345,7 @@ async function loadList() {
   const want = location.hash.slice(1);
   let k = LIST.findIndex(h => h.id === want);
   if (k === -1) k = LIST.findIndex(h => h.session === lastSession);
+  if (RENDER) { CUR = Math.max(0, k); epStart(); return; }
   selectHand(Math.max(0, k));
 }
 
@@ -1533,6 +1539,8 @@ async function epIntro() {
   // “所以——”：一拳下去整屏裂开，裂缝张开，炸碎，直接接三下重击
   later(150, () => crack());
   await line(5);
+  // 碎屏、剪影连闪、冲击波这段只有画面和音乐，铁皮先退场，片名出来再回来
+  laok(false);
   await glassBreak();
   // 碎完：一串金边剪影，左右交替甩进来、一拍比一拍快（唰唰唰唰），最后八个人一起砸出来（啪）
   const hit = $('#hit');
@@ -1584,6 +1592,7 @@ async function epIntro() {
   await W(900);
   camHome(5000);
   await W(1200);
+  laok(true);
   for (const [k, t] of (n.title || []).entries()) await narrate('laok', t, showSrc(`title${k}`));
   $('#lineup').innerHTML = lineupHTML();
   ep.className = 'on lineon';
@@ -1751,6 +1760,7 @@ async function epRun(from) {
     await epSegment(i, me);
     if (me !== EPRUN) return;
   }
+  window.__epDone = true;
 }
 
 function epGo(i) {
@@ -1826,6 +1836,8 @@ async function epStart() {
   btn.disabled = false;
   btn.textContent = '退出整集';
   btn.onclick = () => location.reload();
+  // 渲染时由录制脚本在开始录像之后再调 __play
+  if (RENDER) { window.__play = () => epGo(0); window.__ready = true; return; }
   epGo(0);
 }
 $('#epbtn').addEventListener('click', () => { if (!EP) epStart(); });
@@ -1858,8 +1870,21 @@ $('#prev').addEventListener('click', () => { if (CUR > 0) selectHand(CUR - 1); }
 $('#next').addEventListener('click', () => { if (CUR < LIST.length - 1) selectHand(CUR + 1); });
 $('#handsel').addEventListener('change', e => selectHand(Number(e.target.value)));
 
+const RENDER = new URLSearchParams(location.search).has('render');
+if (RENDER) document.body.classList.add('render');
+// 渲染成视频时：配音和片尾视频也接进 Web Audio，全部声音汇到一路可录的音轨（无头浏览器没有声卡输出，只能这样录声音）
+let renderAudio = null;
+window.__audioStream = () => {
+  if (renderAudio) return renderAudio;
+  const dest = AC.createMediaStreamDestination();
+  master.connect(dest);
+  AC.createMediaElementSource(vo).connect(master);
+  AC.createMediaElementSource($('#endcard')).connect(master);
+  renderAudio = dest.stream;
+  return renderAudio;
+};
 function fit() {
-  const avail = Math.min($('#box').clientWidth, Math.max(320, (window.innerHeight - 210) * 16 / 9));
+  const avail = RENDER ? window.innerWidth : Math.min($('#box').clientWidth, Math.max(320, (window.innerHeight - 210) * 16 / 9));
   const vp = $('#vp');
   vp.style.width = avail + 'px';
   vp.style.height = (avail * 9 / 16) + 'px';
