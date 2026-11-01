@@ -41,6 +41,13 @@ describe('toSpoken', () => {
     expect(toSpoken('BTN的3-bet')).toBe('按钮位的三bet');
   });
 
+  test('会被内容审核误判的黑话换成平实说法，枪口位不动', () => {
+    expect(toSpoken('湿板我更不能让你免费看')).toBe('听牌很多的牌面我更不能让你免费看');
+    expect(toSpoken('三枪你都接了')).toBe('三条街你都接了');
+    expect(toSpoken('转牌我开一枪')).toBe('转牌我下了一注');
+    expect(toSpoken('UTG开池')).toBe('枪口位开池');
+  });
+
   test('普通数字、百分比和表情不受影响', () => {
     expect(toSpoken('跟注300，底池2300')).toBe('跟注300，底池2300');
     expect(toSpoken('胜率35%')).toBe('胜率35%');

@@ -60,6 +60,10 @@ function toSpoken(text) {
   // 单独出现的Q/J/T：顶对J -> 顶对勾
   s = s.replace(/(?<![A-Za-z])([QJT])(?![A-Za-z])/g, (_, r) => rank(r));
 
+  // 牌桌黑话里“湿板”“开枪”会被配音的内容审核误判，念的时候换成平实的说法
+  s = s.replace(/湿(板|牌面|面)/g, '听牌很多的牌面');
+  s = s.replace(/(开|打)(了)?一枪/g, '下了一注').replace(/([一二两三])枪/g, '$1条街');
+
   // 表情和波浪号不念
   s = s.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}️～~]/gu, '');
   return s.trim();

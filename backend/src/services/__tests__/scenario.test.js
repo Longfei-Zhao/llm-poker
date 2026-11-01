@@ -35,9 +35,9 @@ describe('剧本发牌', () => {
     expect(() => buildDeck(ids, { nobody: ['Ah', 'Kd'] })).toThrow('没入座');
   });
 
-  test('第一集的8手剧本都能按设计发出来', () => {
+  test('第一集的10手剧本都能按设计发出来', () => {
     const show = loadShow('s2e1');
-    expect(show.hands).toHaveLength(8);
+    expect(show.hands).toHaveLength(10);
     for (const scenario of show.hands) {
       const game = dealScenario(scenario);
       expect(game.players[game.dealerIndex].id).toBe(scenario.button);

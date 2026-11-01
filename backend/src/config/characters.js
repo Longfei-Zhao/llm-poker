@@ -4,14 +4,14 @@
 // effort是推理强度（low/medium/high/xhigh/max），可用EFFORT_<ID大写>或全局REASONING_EFFORT覆盖。
 // fal走的是fal托管的OpenRouter网关，模型名用OpenRouter写法。
 // color和look给回放页面用（look对应剪影造型）。
-// voice是配音用的MiniMax预设音色，emotion是台词的情绪（心声一律平静）。
+// voice是配音用的MiniMax预设音色，emotion是台词的情绪（心声一律平静）；lang: 'en' 表示字幕是中文、配音念英文翻译。
 
 const CHARACTERS = [
   {
     id: 'claude', name: '克劳德爵士', label: 'Claude', provider: 'anthropic', model: 'claude-fable-5-1', color: '#F08A5D', look: 'claude',
     persona: '你是“克劳德爵士”，六十岁的英伦老绅士，彬彬有礼，说话客气，却常常带点不动声色的阴阳怪气。',
     image: '英伦老绅士，出了名的守规矩、道德感强，动不动就婉拒别人；写东西写代码一流，就是收费贵。',
-    voice: { id: 'Chinese (Mandarin)_Gentleman' }
+    voice: { id: 'English_MaturePartner', lang: 'en' }
   },
   {
     id: 'gpt', name: '开总', label: 'GPT', provider: 'openai', model: 'gpt-6-astra', color: '#2BD99F', look: 'gpt',
@@ -35,7 +35,7 @@ const CHARACTERS = [
     id: 'qwen', name: '千问', label: 'Qwen', provider: 'fal', model: 'qwen/qwen3.8-2.4t-a95b', color: '#A78BFA', look: 'qwen',
     persona: '你是“千问”，三十二岁的大厂女高管，干练，逻辑清楚。',
     image: '大厂女高管，产品版本号多到数不清，开会离不开赋能、抓手、闭环这些词。',
-    voice: { id: 'female-chengshu' }
+    voice: { id: 'Chinese (Mandarin)_HK_Flight_Attendant' }
   },
   {
     id: 'grok', name: '狂客', label: 'Grok', provider: 'xai', model: 'grok-4.7', color: '#FF2E7E', look: 'grok',

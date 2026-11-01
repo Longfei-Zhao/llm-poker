@@ -44,8 +44,9 @@ body { font-family: var(--body); }
 /* the room */
 #cam { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; transition: transform var(--camt, 1.4s) cubic-bezier(0.45, 0, 0.2, 1); }
 #world { position: absolute; inset: 0; }
-/* 房间和牌桌是一整张美漫背景图（backdrop.jpg），台布的椭圆和下面的发牌、筹码坐标严格对齐：中心 (800,430)，台布半径 578×217 */
-.backdrop { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; filter: brightness(0.82) saturate(0.95); }
+/* 房间和牌桌是一整张美漫背景图（backdrop.jpg），台布的椭圆和下面的发牌、筹码坐标严格对齐：中心 (800,430)，台布半径 578×197。
+   图比舞台四周各宽出一圈（左右160、上下90），镜头拉远时不露边 */
+.backdrop { position: absolute; left: -160px; top: -90px; width: 1920px; height: 1080px; filter: brightness(0.82) saturate(0.95); }
 .bdext { position: absolute; left: -240px; top: -120px; width: 2080px; height: 1140px; background: url(backdrop.jpg) center / cover; filter: blur(14px) brightness(0.3); }
 .spill { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 48% 60% at 52% -8%, rgba(255,232,190,0.13), transparent 70%); }
 #tablecv { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; }
@@ -136,9 +137,9 @@ body { font-family: var(--body); }
 #cut .dim { position: absolute; inset: 0; background: rgba(4,4,10,0.72); }
 #cut .band { position: absolute; left: -300px; top: 300px; width: 2200px; height: 320px; background: repeating-linear-gradient(90deg, rgba(5,6,11,0.12) 0 4px, transparent 4px 40px), var(--hot); box-shadow: 0 -6px 0 var(--gold), 0 6px 0 var(--gold); transform: rotate(-9deg) translateX(-120%); }
 #cut.go .band { animation: bandIn 0.32s cubic-bezier(0.2, 0.9, 0.2, 1) forwards, lines 0.4s linear infinite; }
-#cut .who { position: absolute; left: 70px; top: 40px; width: 540px; height: 820px; clip-path: polygon(8% 0, 100% 0, 92% 100%, 0 100%); background: #07080F; box-shadow: inset 0 0 0 5px var(--hot); transform: translateX(-120%); }
+#cut .who { position: absolute; left: 50px; top: 20px; width: 600px; height: 880px; transform: translateX(-120%); }
 #cut .who svg { position: absolute; left: 10px; bottom: 0; width: 520px; height: 572px; color: var(--sil); filter: drop-shadow(0 0 3px var(--hot)) drop-shadow(0 0 24px var(--hot)); }
-#cut .who img { position: absolute; left: 0; top: 30px; width: 540px; filter: drop-shadow(0 0 3px var(--hot)) drop-shadow(0 0 24px var(--hot)); }
+#cut .who img { position: absolute; left: 0; top: 20px; width: 600px; filter: drop-shadow(4px 0 0 #FFF) drop-shadow(-4px 0 0 #FFF) drop-shadow(0 4px 0 #FFF) drop-shadow(0 -4px 0 #FFF) drop-shadow(0 0 28px var(--hot)); }
 #cut.go .who { animation: whoIn 0.38s 0.08s cubic-bezier(0.2, 0.9, 0.2, 1) forwards; }
 #cut .shout { position: absolute; left: 640px; top: 110px; font-family: var(--brush); font-size: 250px; line-height: 1; color: var(--gold); text-shadow: 7px 7px 0 #05060B; transform: rotate(-9deg) scale(3); opacity: 0; }
 #cut.go .shout { animation: slam 0.3s 0.25s cubic-bezier(0.2, 1.4, 0.4, 1) forwards; }
@@ -547,7 +548,7 @@ function reset() {
   const n = LOG.players.length;
   G = LOG.players.map((d, i) => {
     const r = (360 * i / n - 180 / n) * Math.PI / 180;
-    const x = CX + 640 * Math.sin(r), y = CY - 255 * Math.cos(r);
+    const x = CX + 640 * Math.sin(r), y = CY - 232 * Math.cos(r);
     const near = y > 600, far = y < 250;
     const c = d.color || '#C3C8D8';
     const g = { ...d, c, k: d.look, i, x, y, near, far, sc: 0.84 + (y - 175) / 510 * 0.3, ay: y + (near ? 78 : 22), bet: 0, betEl: null, cardEls: [] };
@@ -669,7 +670,7 @@ function apply(i, ev) {
 async function type(node, txt, ms) { if (FF) { node.textContent = txt; return; } for (const ch of txt) { node.textContent += ch; await W(ms); } }
 
 // ---------- sound: 背景音乐和音效（Web Audio）。浏览器要先在页面上点一下才会出声 ----------
-const SFX_GAIN = { deal: 1.4, flip: 1.0, chips: 0.8, allin_chips: 0.9, collect: 1.1, check: 0.9, fold: 2.6, impact: 0.5, win: 0.7 };
+const SFX_GAIN = { deal: 1.4, flip: 1.0, chips: 0.8, allin_chips: 0.9, collect: 1.1, check: 0.9, fold: 2.6, impact: 0.6, allin_sting: 0.8, allin_shout: 1.6, win: 0.7 };
 const MUSIC_VOL = 0.2, MUSIC_DUCKED = 0.08;
 const AC = new (window.AudioContext || window.webkitAudioContext)();
 const master = AC.createGain(), music = AC.createGain(), fx = AC.createGain();
@@ -774,7 +775,8 @@ async function allinCut(i, amt) {
   cam(g.x, g.y - 60, 1.5, 300);
   await W(380);
   cut.classList.remove('go', 'out'); void cut.offsetWidth; cut.classList.add('go');
-  sfx('impact');
+  sfx('allin_sting'); sfx('impact');
+  setTimeout(() => sfx('allin_shout'), 420 / SPEED);
   await W(260);
   if (!REDUCED) { world.classList.remove('shake'); void world.offsetWidth; world.classList.add('shake'); }
   await W(1900);
@@ -798,21 +800,28 @@ async function act(ev) {
     on(i, false);
     return;
   }
+  // 先说话（或先在心里盘算），再出手；全下是说完再放特写
   if (ev.cut) {
+    if (ev.sp || ev.in) await say(i, ev.sp, ev.in, true, false, ev.ev);
+    on(i, true);
     apply(i, ev);
     tick(`${G[i].name} 全下 ${fmt(ev.to)}！`);
     await allinCut(i, ev.to);
-    if (ev.sp || ev.in) await say(i, ev.sp, ev.in, true, false, ev.ev);
   } else if (ev.full) {
     on(i, false);
     await say(i, ev.sp, ev.in, true, false, ev.ev);
     apply(i, ev);
     await W(500);
+  } else if (ev.show === 'say' || ev.show === 'think') {
+    if (ev.show === 'say') await say(i, ev.sp, '', false, false, ev.ev);
+    else await say(i, '', ev.in, false, true, ev.ev);
+    on(i, true);
+    apply(i, ev);
+    await W(350);
   } else {
     apply(i, ev);
-    if (ev.show === 'say') await say(i, ev.sp, '', false, false, ev.ev);
-    else if (ev.show === 'think') await say(i, '', ev.in, false, true, ev.ev);
-    else { barAction(i, ACT_CN[ev.a] || ev.a); await W(450); }
+    barAction(i, ACT_CN[ev.a] || ev.a);
+    await W(450);
   }
   on(i, false);
 }
