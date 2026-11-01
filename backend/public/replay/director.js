@@ -10,7 +10,7 @@
   // - 全下放大招特写；全下之后、河牌上的下注/跟注、大额加注，用完整对话框（台词+心声）并推镜头
   // - 点名对手的台词、下注加注时的台词，放台词
   // - 其余动作放一句心声
-  // - 翻牌前的弃牌每手最多放四句，优先点名了别人的（互相接话最好看）
+  // - 翻牌前的弃牌只放点名了别人的（互相接话），每手最多两句；拿垃圾牌自言自语的直接弃，不占时间
   function direct(log) {
     const idx = Object.fromEntries(log.players.map((p, i) => [p.id, i]));
     const bb = log.blinds[1];
@@ -25,7 +25,7 @@
     const nameOf = Object.fromEntries(log.players.map(p => [p.id, p.name]));
     const mentions = e => !!e.sp && log.players.some(p => p.id !== e.p && e.sp.includes(p.name));
     const preflopFolds = log.events.filter(e => e.t === 'act' && e.street === 'preflop' && e.a === 'fold' && !e.corrected && e.sp);
-    const shownFolds = new Set([...new Set([...preflopFolds.filter(mentions), ...preflopFolds])].slice(0, 4));
+    const shownFolds = new Set(preflopFolds.filter(mentions).slice(0, 2));
     let pressure = false;
     for (const [k, e] of log.events.entries()) {
       if (e.t === 'act') {
@@ -48,6 +48,8 @@
         out.push({ t: 'collect' });
         chap('结算');
         out.push({ t: 'show' });
+        // 赛后感言（postgame.js 补录的），结算后播放
+        (log.post || []).forEach((x, n) => out.push({ t: 'post', p: idx[x.p], sp: x.sp, ev: `post${n}` }));
         out.push({ t: 'end' });
       }
     }

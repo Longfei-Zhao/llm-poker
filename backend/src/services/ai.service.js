@@ -115,6 +115,17 @@ class AIService {
     }
 
     /**
+     * 让AI代理不打牌、只按提示说一句话（比如一手结束后的赛后感言）
+     * @param {string} playerId - 玩家ID
+     * @param {string} prompt - 提示词
+     * @returns {Promise<string>} 说的话
+     */
+    async chat(playerId, prompt) {
+        const response = await this.client.post('/api/chat', { player_id: playerId, prompt });
+        return response.data.text;
+    }
+
+    /**
      * 删除AI代理
      * @param {string} playerId - 玩家ID
      * @returns {Promise<void>}

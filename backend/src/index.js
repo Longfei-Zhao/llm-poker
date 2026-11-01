@@ -9,6 +9,8 @@ const { WebSocketService } = require('./services/ws.service');
 const aiService = require('./services/ai.service');
 const logger = require('./utils/logger');
 const config = require('./config');
+const { loadShow } = require('./services/scenario');
+const { CHARACTERS } = require('./config/characters');
 require('dotenv').config();
 
 // 创建Express应用
@@ -129,6 +131,20 @@ app.get('/api/hands/:id', (req, res) => {
   const file = path.join(config.HANDS_DIR, `${id}.json`);
   if (!fs.existsSync(file)) return res.status(404).json({ error: '找不到这一手' });
   res.type('application/json').send(fs.readFileSync(file, 'utf8'));
+});
+
+// 整集播放：剧本（含成片的出场顺序 episode）和角色表（片头介绍用）
+app.get('/api/shows/:name', (req, res) => {
+  const { name } = req.params;
+  if (!/^[\w-]+$/.test(name)) return res.status(400).json({ error: '无效的剧本名' });
+  try {
+    res.json(loadShow(name));
+  } catch (error) {
+    res.status(404).json({ error: '找不到这个剧本' });
+  }
+});
+app.get('/api/characters', (req, res) => {
+  res.json(CHARACTERS.map(({ id, name, label, model, modelName, color, image }) => ({ id, name, label, model, modelName, color, image })));
 });
 
 // 回放页面

@@ -238,6 +238,28 @@ class OpenAICompatibleAgent(BaseAgent):
             logger.error("意外错误: %s", e)
             raise APIError(f"{self.provider} API调用失败: {str(e)}")
 
+    async def chat(self, prompt: str) -> str:
+        """不打牌，只按提示说一句话（比如一手结束后的赛后感言），返回纯文本"""
+        kwargs = {"model": self.model, "messages": [{"role": "user", "content": prompt}]}
+        if self.provider == "openai":
+            kwargs["max_completion_tokens"] = 4000
+            kwargs["reasoning_effort"] = "low"
+        else:
+            kwargs["max_tokens"] = 8000
+            kwargs["temperature"] = self.temperature
+            if self.provider == "fal":
+                kwargs["extra_body"] = {"reasoning": {"effort": "low"}}
+        try:
+            for attempt in range(2):
+                response = await self.client.chat.completions.create(**kwargs)
+                content = response.choices[0].message.content
+                if content:
+                    return content.strip()
+                logger.warning("%s %s 闲聊返回空内容，第%d次", self.provider, self.model, attempt + 1)
+        except OpenAIAPIError as e:
+            raise APIError(f"{self.provider} API调用失败: {str(e)}")
+        raise APIError(f"{self.provider} {self.model} 连续返回空内容")
+
     async def list_available_models(self) -> List[Dict]:
         """
         获取可用模型列表，用于诊断模型可用性问题

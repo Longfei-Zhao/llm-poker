@@ -107,6 +107,14 @@ class DecisionResponse(BaseModel):
     thinking: Optional[str] = None
     speech: Optional[str] = None
 
+class ChatRequest(BaseModel):
+    """让某个代理不打牌、只说一句话（赛后感言之类）"""
+    player_id: str
+    prompt: str
+
+class ChatResponse(BaseModel):
+    text: str
+
 class AgentInfo(BaseModel):
     """代理信息响应模型"""
     player_id: str
@@ -209,6 +217,16 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
     }, ensure_ascii=False))
 
     return DecisionResponse(action=action, amount=amount, thinking=thinking, speech=speech)
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest) -> ChatResponse:
+    """让代理按提示说一句话，比如一手牌结束后的赛后感言"""
+    agent = agents.get(request.player_id)
+    if not agent:
+        raise PlayerError(f"找不到玩家{request.player_id}的AI代理")
+    if not hasattr(agent, "chat"):
+        raise PlayerError(f"玩家{request.player_id}的代理不支持闲聊")
+    return ChatResponse(text=await agent.chat(request.prompt))
 
 @app.delete("/api/agents/{player_id}")
 async def delete_agent(player_id: str):

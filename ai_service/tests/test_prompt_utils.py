@@ -256,3 +256,9 @@ def test_build_prompt_keeps_hole_cards_out_of_speech():
     players = [_player("A", 1), _player("B", 2, ["Ah", "Kd"]), _player("C", 3)]
     prompt = build_prompt(_state(players, 0), "B", VALID_ACTIONS, 20, 1000)
     assert "never name your actual hole cards" in prompt
+
+def test_build_prompt_asks_inner_not_to_recite_cards():
+    """心声给观众看，观众看得到牌，不用逐张念牌面"""
+    players = [_player("A", 1), _player("B", 2, ["Ah", "Kd"]), _player("C", 3)]
+    prompt = build_prompt(_state(players, 0), "B", VALID_ACTIONS, 20, 1000)
+    assert "do not read the board or your hand out card by card" in prompt

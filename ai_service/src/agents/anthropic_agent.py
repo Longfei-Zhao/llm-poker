@@ -151,3 +151,19 @@ class AnthropicAgent(BaseAgent):
         except Exception as e:
             logger.error("意外错误: %s", e)
             raise APIError(f"Anthropic API调用失败: {str(e)}")
+
+    async def chat(self, prompt: str) -> str:
+        """不打牌，只按提示说一句话（比如一手结束后的赛后感言），返回纯文本"""
+        try:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=4000,
+                messages=[{"role": "user", "content": prompt}],
+                extra_body={"output_config": {"effort": "low"}, "fallbacks": "default"},
+                extra_headers={"anthropic-beta": "server-side-fallback-2026-07-01"},
+            )
+        except anthropic.APIError as e:
+            raise APIError(f"Anthropic API调用失败: {str(e)}")
+        if response.stop_reason == "refusal":
+            raise DecisionError("Claude拒绝回答")
+        return "".join(getattr(b, "text", "") for b in response.content if getattr(b, "type", "") == "text").strip()

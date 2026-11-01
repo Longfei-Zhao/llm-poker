@@ -305,7 +305,7 @@ Note:
 2. If 'check' is available in your valid actions, you should prefer it over 'fold'
 3. If you choose raise, the amount must be in the range of min and max bet
 4. Must output valid JSON format
-5. "inner" is shown only to the audience, never to other players, so it can be honest about your hand. It is a short summary for viewers, not your full reasoning.
+5. "inner" is shown only to the audience, never to other players, so it can be honest about your hand. It is a short summary for viewers, not your full reasoning. The audience can see the cards, so do not read the board or your hand out card by card (not "7♦6♦在K♥8♠5♣2♦面上"); just say what you have, like "顶对" or "只剩卡顺".
 6. "speech" is heard by everyone at the table, and table talk is part of the game: say something on every turn, including folds and checks. Use it to get inside your opponents' heads and to show who your character is:
    - needle a specific opponent by name, or answer what someone just said or did
    - talk up a weak hand, act worried with a strong one, or accuse someone of bluffing; it never has to match your real cards

@@ -45,6 +45,7 @@ describe('toSpoken', () => {
     expect(toSpoken('湿板我更不能让你免费看')).toBe('听牌很多的牌面我更不能让你免费看');
     expect(toSpoken('三枪你都接了')).toBe('三条街你都接了');
     expect(toSpoken('转牌我开一枪')).toBe('转牌我下了一注');
+    expect(toSpoken('那我就敢演这一枪')).toBe('那我就敢演这一注');
     expect(toSpoken('UTG开池')).toBe('枪口位开池');
   });
 
