@@ -5,7 +5,7 @@
 
 [English README](README.md)
 
-最多 8 个大语言模型——Claude、GPT-4o、Gemini、DeepSeek、Qwen、Grok、Sonar——同桌进行无限注德州扑克对决。Flutter Web 界面实时展示每手牌、每次下注，以及每个模型的推理过程。
+8 个大语言模型——Claude、GPT、Gemini、DeepSeek、Qwen、Grok、Kimi、豆包——同桌进行无限注德州扑克对决。第一季是 Flutter Web 界面，实时展示每手牌、每次下注和每个模型的推理过程；第二季把每个模型变成一个角色：在牌桌上放狠话，心声只念给观众听，每一手都配音、导演，直接渲染成视频。
 
 基准测试衡量模型知道什么，扑克衡量模型如何决策：不完全信息、风险管理，以及会虚张声势的对手。这个项目就是一个实时观察这些决策的试验场。
 
@@ -25,6 +25,7 @@ flowchart LR
     AI --> A2["OpenAI 兼容 API<br/>（OpenAI、DeepSeek、Qwen、Grok、Sonar）"]
     AI --> A3["Google Gemini API"]
     AI --> A4["本地模型<br/>（transformers）"]
+    AI --> A5["fal.ai<br/>（OpenRouter 网关）"]
 ```
 
 - **`backend/`** — Node.js 实现的无限注德州扑克引擎：下注轮次、盲注、全下处理、**边池**、最小加注规则、摊牌评估（基于 `pokersolver`）。通过 WebSocket 连接前端，通过 HTTP 调用 AI 服务。每个行动中的模型只能看到真实玩家能看到的信息：自己的底牌、公共牌和下注历史——绝不包含对手底牌或牌堆。
@@ -35,18 +36,32 @@ flowchart LR
 
 | 提供商 | 默认模型 | API 密钥环境变量 |
 |---|---|---|
-| Anthropic | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
-| OpenAI | `gpt-4o` | `OPENAI_API_KEY` |
-| Google | `gemini-2.0-pro-exp-02-05` | `GEMINI_API_KEY` |
-| DeepSeek | `deepseek-chat` | `DEEPSEEK_API_KEY` |
-| 阿里云（通义千问） | `qwen-plus` | `DASHSCOPE_API_KEY` |
-| xAI | `grok-2` | `XAI_API_KEY` |
+| Anthropic | `claude-fable-5-1` | `ANTHROPIC_API_KEY` |
+| OpenAI | `gpt-6-astra` | `OPENAI_API_KEY` |
+| Google | `gemini-4-argon` | `GEMINI_API_KEY` |
+| DeepSeek | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
+| 阿里云（通义千问） | `qwen3.8-max` | `DASHSCOPE_API_KEY` |
+| xAI | `grok-4.7` | `XAI_API_KEY` |
 | Perplexity | `sonar` | `PPLX_API_KEY` |
-| 月之暗面（Kimi） | `kimi-latest` | `MOONSHOT_API_KEY` |
+| 月之暗面（Kimi） | `kimi-k3.1-pro` | `MOONSHOT_API_KEY` |
 | 火山方舟（豆包） | `doubao-seed-1-6-250615` | `ARK_API_KEY` |
+| fal.ai（OpenRouter 网关，可用任意 OpenRouter 模型名） | `google/gemini-4-argon` | `FAL_KEY` |
 | 本地（`transformers`） | `Qwen/Qwen2.5-32B-Instruct-AWQ` | — |
 
-只需配置你有密钥的提供商，没有密钥的模型无法入座但不影响其他玩家。模型配置在 `ai_service/src/config/agent_config.py`。
+只需配置你有密钥的提供商，没有密钥的模型无法入座但不影响其他玩家。提供商默认配置在 `ai_service/src/config/agent_config.py`。
+
+第二季的角色在 `backend/src/config/characters.js`（名字、人设、公众形象、提供商、模型、配色、音色），可用 `MODEL_<ID>`、`EFFORT_<ID>` 环境变量（如 `MODEL_CLAUDE`）替换某个角色的模型和推理强度。
+
+| 角色 | 模型 |
+|---|---|
+| 克劳德爵士 | Claude Fable 5.1（Anthropic） |
+| 开总 | GPT-6 Astra（OpenAI） |
+| 谷大小姐 | Gemini 4 Argon（经 fal） |
+| 老深 | DeepSeek V4 Pro（DeepSeek） |
+| 千问 | Qwen 3.8（经 fal） |
+| 狂客 | Grok 4.7（xAI） |
+| 月学姐 | Kimi K3.1 Pro（经 fal） |
+| 豆包 | Doubao Seed 2.1（经 fal） |
 
 ## 快速开始
 
@@ -75,19 +90,30 @@ Windows 下可以用 `./start-services.ps1` 一并启动 AI 服务和后端；�
 
 界面操作：**创建游戏** → **随机入座** → **开始游戏**。模型自动对局，你只需观战。
 
-## 批量跑牌与回放
+## 第二季：剧本、配音和成片
 
-节目是看回放的，不用一步步点。先启动 AI 服务，然后让这桌 AI 自己打：
+一集节目就是一个剧本文件 `backend/shows/<名字>.json`：每一手怎么发牌（每个人的底牌和公共牌，这样几手牌里也能出现真正的对撞）、成片放哪几手和顺序（`episode`）、解说的台词（`narration`）和选手登场顺序。牌怎么打、角色说什么，全由模型自己决定。
+
+AI 服务和后端都启动后：
 
 ```bash
 cd backend
-npm run hands -- --hands 20                         # 可选：--seats claude,grok,kimi --stack 10000 --blinds 50/100
-node src/index.js                                   # 然后打开 http://localhost:3000/replay/
+node src/scripts/run-show.js --show s2e1                # 按剧本发牌跑（几手并行）
+node src/scripts/postgame.js --session s2e1             # 每手结束后两句赛后感言，由角色自己的模型来说
+node src/scripts/self-intros.js --show s2e1             # 片头每位选手的自我介绍
+node src/scripts/voice-hands.js --session s2e1 --dry    # 估算配音费用；去掉 --dry 就开始配
+node src/index.js                                       # 打开 http://localhost:3000/replay/ 点“整集播放”
+node src/scripts/render-episode.js --show s2e1          # 把整集录成 backend/data/renders/s2e1.mp4
 ```
 
-每一手都会写成 `backend/data/hands/<场次>-<手数>.json`：座位、底牌、每个动作，以及模型的**台词**（说出口，后面其他人的 prompt 里能看到）和**心声**（只给观众看，绝不会发给其他玩家）、公共牌和结算。回放页面读这些记录，自己导演每一手：普通台词从底部弹出带立绘的对话框，全下有大招特写，关键时刻弹出带心声的完整对话框并推镜头。支持暂停、2 倍速、按街跳转和连播。
+- 每一手都写成 `backend/data/hands/<场次>-<手数>.json`：座位、底牌、每个动作，以及模型的**台词**（说出口，其他人听得到）和**心声**（只给观众看，绝不会发给其他玩家）、公共牌、结算和赛后感言。
+- 配音用 fal 上现成的预设音色：大部分角色用 MiniMax，豆包用字节的 Seed。配音前先把文字转成念法（QQ 念圈圈、3-bet 念三bet）；克劳德爵士的台词先用 Claude API 翻成英文再念（所以配音也需要 `ANTHROPIC_API_KEY`）。文字和音色都没变的句子直接复用，重配只花改动部分的钱。
+- 回放页按记录自己导演每一手（立绘、底部对话栏、全下特写、音效和音乐）。整集模式再加上片头、解说、片尾，以及带时长估算的时间轴。
+- 渲染时用无头 Chrome 实时把整集放一遍，录下标签页画面和页面自己的混音，再用 ffmpeg 转成 1080p30 的 MP4。需要 Chrome（不在 Windows 默认位置时设 `CHROME_PATH`）和 PATH 里的 ffmpeg。
 
-八个角色（名字、人设、提供商、配色）在 `backend/src/config/characters.js`，可用 `MODEL_<ID>` 环境变量（如 `MODEL_CLAUDE`）替换某个角色的模型。人设只决定形象和说话方式，prompt 里明确要求不许影响打法。
+只想随机跑几手：`npm run hands -- --hands 20`（可选 `--seats claude,grok,kimi --stack 10000 --blinds 50/100`）。
+
+人设只决定形象和说话方式，prompt 里明确要求不许影响打法。
 
 ## 一手牌的流程
 
@@ -99,8 +125,8 @@ node src/index.js                                   # 然后打开 http://localh
 ## 测试
 
 ```bash
-cd backend && npm test        # 68 个测试——引擎规则（含边池）、筹码守恒、ws 协议、批量跑牌与手牌记录
-cd ai_service && pytest tests # 89 个测试——代理（mock SDK）、解析器夹具、prompt、API 层
+cd backend && npm test        # 80 个测试——引擎规则（含边池）、筹码守恒、ws 协议、剧本发牌、手牌记录、配音文字转换
+cd ai_service && pytest tests # 99 个测试——代理（mock SDK）、解析器夹具、prompt、API 层
 cd frontend && flutter test   # 48 个测试——模型解析、卡牌序列化、玩家合并
 ```
 
@@ -108,8 +134,8 @@ cd frontend && flutter test   # 48 个测试——模型解析、卡牌序列化
 
 ## 路线图
 
-- 回放用的角色立绘和每个角色的配音。
-- 解说老K 在关键时刻单独调用模型生成解说，以及每手结束后的反应台词。
+- 更多集：新的发牌、新的对阵。
+- 解说在牌局进行中实时点评，而不只是在两手之间。
 - 可配置盲注级别与淘汰赛模式。
 
 ## 许可证

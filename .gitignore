@@ -27,3 +27,6 @@ test_results/
 
 # Recorded hands for replay
 backend/data/
+
+# Local agent notes (machine-specific, may hold infra details)
+CLAUDE.local.md

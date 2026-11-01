@@ -5,7 +5,7 @@
 
 [中文版 README](README.zh-CN.md)
 
-Up to 8 large language models — Claude, GPT-4o, Gemini, DeepSeek, Qwen, Grok, Sonar — sit at the same No-Limit Texas Hold'em table and play against each other. A Flutter web UI shows every hand, every bet, and each model's reasoning in real time.
+Eight large language models — Claude, GPT, Gemini, DeepSeek, Qwen, Grok, Kimi and Doubao — sit at the same No-Limit Texas Hold'em table and play against each other. Season 1 is a Flutter web UI that shows every hand, every bet and each model's reasoning live. Season 2 turns each model into a character: it trash-talks the table, thinks out loud for the audience only, and the hands are voiced, directed and rendered straight to video.
 
 Benchmarks measure what a model knows. Poker measures how it decides: incomplete information, risk management, and opponents that lie. This project is a live harness for watching those decisions happen.
 
@@ -25,6 +25,7 @@ flowchart LR
     AI --> A2["OpenAI-compatible APIs<br/>(OpenAI, DeepSeek, Qwen, Grok, Sonar)"]
     AI --> A3["Google Gemini API"]
     AI --> A4["Local model<br/>(transformers)"]
+    AI --> A5["fal.ai<br/>(OpenRouter gateway)"]
 ```
 
 - **`backend/`** — a No-Limit Texas Hold'em engine in Node.js: betting rounds, blinds, all-in handling, **side pots**, min-raise enforcement, and showdown evaluation (via `pokersolver`). Talks WebSocket to the UI and HTTP to the AI service. Each acting model receives only what a real player would see: its own hole cards, the board, and the betting history — never opponents' cards or the deck.
@@ -35,18 +36,32 @@ flowchart LR
 
 | Provider | Default model | API key env var |
 |---|---|---|
-| Anthropic | `claude-sonnet-5-5` | `ANTHROPIC_API_KEY` |
-| OpenAI | `gpt-4o` | `OPENAI_API_KEY` |
-| Google | `gemini-2.0-pro-exp-02-05` | `GEMINI_API_KEY` |
-| DeepSeek | `deepseek-chat` | `DEEPSEEK_API_KEY` |
-| Alibaba (Qwen) | `qwen-plus` | `DASHSCOPE_API_KEY` |
-| xAI | `grok-2` | `XAI_API_KEY` |
+| Anthropic | `claude-fable-5-1` | `ANTHROPIC_API_KEY` |
+| OpenAI | `gpt-6-astra` | `OPENAI_API_KEY` |
+| Google | `gemini-4-argon` | `GEMINI_API_KEY` |
+| DeepSeek | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
+| Alibaba (Qwen) | `qwen3.8-max` | `DASHSCOPE_API_KEY` |
+| xAI | `grok-4.7` | `XAI_API_KEY` |
 | Perplexity | `sonar` | `PPLX_API_KEY` |
-| Moonshot (Kimi) | `kimi-latest` | `MOONSHOT_API_KEY` |
+| Moonshot (Kimi) | `kimi-k3.1-pro` | `MOONSHOT_API_KEY` |
 | Volcengine Ark (Doubao) | `doubao-seed-1-6-250615` | `ARK_API_KEY` |
+| fal.ai (OpenRouter gateway, any OpenRouter model id) | `google/gemini-4-argon` | `FAL_KEY` |
 | Local (`transformers`) | `Qwen/Qwen2.5-32B-Instruct-AWQ` | — |
 
-Only the providers you have keys for need to be configured; the rest simply can't be seated. Provider defaults live in `ai_service/src/config/agent_config.py`; the eight table characters (name, persona, provider, colour) live in `backend/src/config/characters.js`, and `MODEL_<ID>` env vars (e.g. `MODEL_CLAUDE`) override a character's model.
+Only the providers you have keys for need to be configured; the rest simply can't be seated. Provider defaults live in `ai_service/src/config/agent_config.py`.
+
+The Season 2 cast lives in `backend/src/config/characters.js` (name, persona, public image, provider, model, colour, voice). `MODEL_<ID>` and `EFFORT_<ID>` env vars (e.g. `MODEL_CLAUDE`) override a character's model and reasoning effort.
+
+| Character | Model |
+|---|---|
+| 克劳德爵士 Sir Claude | Claude Fable 5.1 (Anthropic) |
+| 开总 | GPT-6 Astra (OpenAI) |
+| 谷大小姐 | Gemini 4 Argon (via fal) |
+| 老深 | DeepSeek V4 Pro (DeepSeek) |
+| 千问 | Qwen 3.8 (via fal) |
+| 狂客 | Grok 4.7 (xAI) |
+| 月学姐 | Kimi K3.1 Pro (via fal) |
+| 豆包 | Doubao Seed 2.1 (via fal) |
 
 ## Quickstart
 
@@ -75,17 +90,28 @@ On Windows, `./start-services.ps1` starts the AI service and backend together; t
 
 In the UI: **创建游戏** (create game) → **随机入座** (seat models randomly) → **开始游戏** (start). The models play on their own; you watch.
 
-## Batch runs and replay
+## Season 2: scripted episodes, voices and video
 
-The show is watched as replays, not clicked through live. Start the AI service, then let the table play on its own:
+An episode is a show file, `backend/shows/<name>.json`: the deal for each hand (every hole card and the board, so a handful of hands can still produce real clashes), which hands make the episode and in what order (`episode`), the commentator's lines (`narration`) and the cast's intro order. How the hands are played, and everything the characters say, comes from the models.
+
+With the AI service and backend running:
 
 ```bash
 cd backend
-npm run hands -- --hands 20                         # optional: --seats claude,grok,kimi --stack 10000 --blinds 50/100
-node src/index.js                                   # then open http://localhost:3000/replay/
+node src/scripts/run-show.js --show s2e1                # play the scripted deals (hands run in parallel)
+node src/scripts/postgame.js --session s2e1             # two post-hand lines per hand, each from the character's own model
+node src/scripts/self-intros.js --show s2e1             # each character introduces itself for the opening
+node src/scripts/voice-hands.js --session s2e1 --dry    # how much voicing would cost; drop --dry to voice it
+node src/index.js                                       # open http://localhost:3000/replay/ and press 整集播放
+node src/scripts/render-episode.js --show s2e1          # record the whole episode to backend/data/renders/s2e1.mp4
 ```
 
-Every hand is written to `backend/data/hands/<session>-<n>.json`: seats, hole cards, each action with the model's **speech** (said out loud, other players hear it in later prompts) and **inner monologue** (audience only, never shown to other players), the board, and the payout. The replay page reads these logs and directs each hand on its own: quick lines pop up in a bottom dialogue box with the character's portrait, all-ins get a cut-in, and big moments get the full box with the inner monologue and a camera push. It can pause, play at 2×, jump to a street, and play hands back to back.
+- Every hand is written to `backend/data/hands/<session>-<n>.json`: seats, hole cards, each action with the model's **speech** (said out loud, the other players hear it) and **inner monologue** (audience only, never sent to other players), the board, the payout and the post-hand banter.
+- Voices are preset TTS voices through fal: MiniMax for most of the cast, ByteDance Seed for Doubao. Lines are rewritten for speech first (QQ is read 圈圈, 3-bet 三bet), Claude's lines are translated to English with the Claude API (so voicing needs `ANTHROPIC_API_KEY` too), and lines whose text and voice haven't changed are reused, so re-voicing costs only what changed.
+- The replay page directs each hand from its log (portraits, a talk bar, all-in cut-ins, sound effects and music). Episode mode adds the intro, the commentator, the outro and a timeline with a duration estimate.
+- Rendering plays the episode once in real time in headless Chrome and records the tab plus the page's own audio mix, then encodes a 1080p30 MP4 with ffmpeg. It needs Chrome (`CHROME_PATH` if it isn't in the default Windows location) and ffmpeg on the PATH.
+
+For plain random games: `npm run hands -- --hands 20` (optional `--seats claude,grok,kimi --stack 10000 --blinds 50/100`).
 
 Personas only shape how a character looks and talks; the prompt tells the model they must not change how it plays.
 
@@ -99,8 +125,8 @@ Personas only shape how a character looks and talks; the prompt tells the model 
 ## Testing
 
 ```bash
-cd backend && npm test        # 68 tests — engine rules incl. side pots, chip conservation, ws protocol, batch runner + hand logs
-cd ai_service && pytest tests # 89 tests — agents (mocked SDKs), parser fixtures, prompts, API layer
+cd backend && npm test        # 80 tests — engine rules incl. side pots, chip conservation, ws protocol, scripted deals, hand logs, speech text
+cd ai_service && pytest tests # 99 tests — agents (mocked SDKs), parser fixtures, prompts, API layer
 cd frontend && flutter test   # 48 tests — model parsing, card round-trips, player merging
 ```
 
@@ -108,8 +134,8 @@ All three suites run in CI on every push.
 
 ## Roadmap
 
-- Character portraits and per-character TTS voices for the replay.
-- The commentator (老K) as its own model call at key moments, plus post-hand reaction lines.
+- More episodes with new deals and new pairings.
+- The commentator reacting live during hands, not just between them.
 - Configurable table stakes and tournament (elimination) mode.
 
 ## License
