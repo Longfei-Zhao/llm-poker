@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from .agents.llm_factory import LLMFactory
 from .agents.base_agent import BaseAgent
-from .config.agent_config import get_api_key, get_provider_config
+from .config.agent_config import get_api_key, get_provider_config, openai_compatible_providers
 from .exceptions import AIServiceError, ConfigError, PlayerError
 
 # 加载环境变量
@@ -83,6 +83,7 @@ class CreateAgentRequest(BaseModel):
     provider: str
     model: Optional[str] = None
     temperature: Optional[float] = 0.7
+    effort: Optional[str] = None  # 推理强度：low/medium/high/xhigh/max，仅Anthropic和OpenAI兼容代理使用
 
 class CreateAgentResponse(BaseModel):
     """创建代理响应模型"""
@@ -100,10 +101,19 @@ class DecisionRequest(BaseModel):
     max_bet: int
 
 class DecisionResponse(BaseModel):
-    """决策响应"""
+    """决策响应：thinking是心声（只给观众看），speech是说出口的台词"""
     action: str
     amount: Optional[int] = None
     thinking: Optional[str] = None
+    speech: Optional[str] = None
+
+class ChatRequest(BaseModel):
+    """让某个代理不打牌、只说一句话（赛后感言之类）"""
+    player_id: str
+    prompt: str
+
+class ChatResponse(BaseModel):
+    text: str
 
 class AgentInfo(BaseModel):
     """代理信息响应模型"""
@@ -135,6 +145,11 @@ async def create_agent(request: CreateAgentRequest) -> CreateAgentResponse:
     if not api_key and get_provider_config(actual_provider).api_key_env is not None:
         raise ConfigError(f"未配置{actual_provider}的API密钥")
 
+    # 只有Anthropic和OpenAI兼容代理认识effort参数
+    effort_kwargs = {}
+    if request.effort and (actual_provider == "anthropic" or actual_provider in openai_compatible_providers()):
+        effort_kwargs["effort"] = request.effort
+
     # 创建代理实例
     agent = LLMFactory.create_agent(
         provider=actual_provider,
@@ -142,7 +157,8 @@ async def create_agent(request: CreateAgentRequest) -> CreateAgentResponse:
         name=request.name,
         api_key=api_key,
         model=request.model,
-        temperature=request.temperature
+        temperature=request.temperature,
+        **effort_kwargs
     )
 
     # 保存到代理池
@@ -177,6 +193,7 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
         raise PlayerError(f"找不到玩家{request.player_id}的AI代理")
 
     # 获取决策
+    agent.last_speech = None
     start_time = time.time()
     action, amount, thinking = await agent.make_decision(
         game_state=request.game_state,
@@ -185,6 +202,7 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
         max_bet=request.max_bet
     )
     latency_ms = int((time.time() - start_time) * 1000)
+    speech = getattr(agent, "last_speech", None)
 
     # 输出结构化决策日志（JSONL），用于后续对局数据分析
     decision_logger.info(json.dumps({
@@ -195,9 +213,20 @@ async def make_decision(request: DecisionRequest) -> DecisionResponse:
         "action": action,
         "amount": amount,
         "latency_ms": latency_ms,
+        "speech": speech,
     }, ensure_ascii=False))
 
-    return DecisionResponse(action=action, amount=amount, thinking=thinking)
+    return DecisionResponse(action=action, amount=amount, thinking=thinking, speech=speech)
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest) -> ChatResponse:
+    """让代理按提示说一句话，比如一手牌结束后的赛后感言"""
+    agent = agents.get(request.player_id)
+    if not agent:
+        raise PlayerError(f"找不到玩家{request.player_id}的AI代理")
+    if not hasattr(agent, "chat"):
+        raise PlayerError(f"玩家{request.player_id}的代理不支持闲聊")
+    return ChatResponse(text=await agent.chat(request.prompt))
 
 @app.delete("/api/agents/{player_id}")
 async def delete_agent(player_id: str):

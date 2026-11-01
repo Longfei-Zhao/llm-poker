@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 module.exports = {
     // 服务器配置
@@ -6,10 +7,17 @@ module.exports = {
     
     // AI服务配置
     AI_SERVICE_URL: process.env.AI_SERVICE_URL || 'http://localhost:8000',
+    AI_REQUEST_TIMEOUT_MS: parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 1800000,
 
     // 游戏配置（盲注唯一来源，引擎和WS层统一从这里读取）
     SMALL_BLIND: parseInt(process.env.SMALL_BLIND, 10) || 5,
     BIG_BLIND: parseInt(process.env.BIG_BLIND, 10) || 10,
+
+    // 回放记录保存目录
+    HANDS_DIR: process.env.HANDS_DIR || path.join(__dirname, '..', '..', 'data', 'hands'),
+
+    // 配音保存目录：每手一个子目录，里面是音频和manifest.json
+    VOICE_DIR: process.env.VOICE_DIR || path.join(__dirname, '..', '..', 'data', 'voice'),
 
     // 日志配置
     LOG_LEVEL: process.env.LOG_LEVEL || 'info',

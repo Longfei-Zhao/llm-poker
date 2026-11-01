@@ -15,34 +15,34 @@ class ProviderConfig(BaseModel):
 # 提供商配置表
 PROVIDERS: Dict[str, ProviderConfig] = {
     "anthropic": ProviderConfig(
-        default_model="claude-3-7-sonnet-20250219",
+        default_model="claude-fable-5-1",
         api_key_env="ANTHROPIC_API_KEY",
     ),
     "openai": ProviderConfig(
-        default_model="gpt-4o",
+        default_model="gpt-6-astra",
         api_key_env="OPENAI_API_KEY",
         api_base="https://api.openai.com/v1",
         openai_compatible=True,
     ),
     "deepseek": ProviderConfig(
-        default_model="deepseek-chat",
+        default_model="deepseek-v4-pro",
         api_key_env="DEEPSEEK_API_KEY",
         api_base="https://api.deepseek.com/v1",
         openai_compatible=True,
     ),
     "gemini": ProviderConfig(
-        default_model="gemini-2.0-pro-exp-02-05",
+        default_model="gemini-4-argon",
         api_key_env="GEMINI_API_KEY",
     ),
     "aliyun": ProviderConfig(
-        default_model="qwen-plus",
+        default_model="qwen3.8-max",
         api_key_env="DASHSCOPE_API_KEY",
         # 阿里云通义千问的OpenAI兼容模式API
         api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
         openai_compatible=True,
     ),
     "xai": ProviderConfig(
-        default_model="grok-2",
+        default_model="grok-4.7",
         api_key_env="XAI_API_KEY",
         api_base="https://api.x.ai/v1",
         openai_compatible=True,
@@ -51,6 +51,26 @@ PROVIDERS: Dict[str, ProviderConfig] = {
         default_model="sonar",
         api_key_env="PPLX_API_KEY",
         api_base="https://api.perplexity.ai",
+        openai_compatible=True,
+    ),
+    "moonshot": ProviderConfig(
+        default_model="kimi-k3.1-pro",
+        api_key_env="MOONSHOT_API_KEY",
+        api_base="https://api.moonshot.cn/v1",
+        openai_compatible=True,
+    ),
+    # 火山方舟（豆包）：模型名要用方舟控制台里开通的模型或接入点ID，可在请求的model里指定
+    "doubao": ProviderConfig(
+        default_model="doubao-seed-1-6-250615",
+        api_key_env="ARK_API_KEY",
+        api_base="https://ark.cn-beijing.volces.com/api/v3",
+        openai_compatible=True,
+    ),
+    # fal托管的OpenRouter网关：一个FAL_KEY调用多家模型，模型名用OpenRouter的写法（如google/gemini-4-argon）
+    "fal": ProviderConfig(
+        default_model="google/gemini-4-argon",
+        api_key_env="FAL_KEY",
+        api_base="https://fal.run/openrouter/router/openai/v1",
         openai_compatible=True,
     ),
     "local": ProviderConfig(
@@ -62,12 +82,19 @@ PROVIDERS: Dict[str, ProviderConfig] = {
 # 提供商别名映射（支持多种名称指向同一提供商）
 PROVIDER_ALIASES: Dict[str, str] = {
     "google": "gemini",  # Google的Gemini模型
+    "kimi": "moonshot",
 }
 
 # 反向别名映射（用于显示）
 REVERSE_ALIASES: Dict[str, str] = {
     "gemini": "google",  # 将内部的gemini显示为google
 }
+
+# 推理强度（low/medium/high/xhigh/max），支持的模型才会用到；可按角色在创建代理时覆盖
+DEFAULT_EFFORT = os.getenv("REASONING_EFFORT", "medium")
+
+# 单次模型调用超时（秒）。旗舰推理模型一次决策可能要好几分钟
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "420"))
 
 def get_provider_config(provider: str) -> ProviderConfig:
     """获取提供商配置，不存在时抛出KeyError"""

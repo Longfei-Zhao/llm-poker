@@ -290,14 +290,20 @@ class WebSocketService {
   void _setupMessageListener() {
     if (_broadcastStream == null) return;
 
+    // 重连时旧通道被关闭，它的onDone/onError会晚于新连接建立才触发；
+    // 只处理当前通道的事件，否则旧通道会把刚建好的新连接标成断开并再次重连
+    final channel = _channel;
+
     _broadcastStream!.listen(
       (message) {
+        if (!identical(channel, _channel)) return;
         // 更新最后活动时间
         _updateLastActivity();
         // 处理消息
         _handleMessage(message);
       },
       onDone: () {
+        if (!identical(channel, _channel)) return;
         _log('WebSocket连接已关闭');
         connectionStatusNotifier.value = WSConnectionStatus.disconnected;
         errorMessageNotifier.value = "连接已关闭";
@@ -310,6 +316,7 @@ class WebSocketService {
         _scheduleReconnect();
       },
       onError: (error) {
+        if (!identical(channel, _channel)) return;
         _log('WebSocket错误: $error');
         connectionStatusNotifier.value = WSConnectionStatus.disconnected;
         errorMessageNotifier.value = "连接错误: ${error.toString()}";
@@ -627,6 +634,7 @@ class WebSocketService {
         case 'gameCreated':
         case 'gameReset':
         case 'gameStageChanged':
+        case 'handResult':
           _gameStateController.add(data);
           break;
 

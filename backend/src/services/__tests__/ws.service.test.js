@@ -330,4 +330,65 @@ describe('WebSocketService', () => {
       expect(ws.sent.some(m => m.type === 'error' && m.message.includes('addPlayer'))).toBe(true);
     });
   });
+  describe('数据传输修复', () => {
+    test('状态中每个玩家应带isDealer标记', () => {
+      createAndStartGame();
+      const started = ws.sent.find(m => m.type === 'gameStarted');
+      const dealers = started.gameState.players.filter(p => p.isDealer);
+      expect(dealers).toHaveLength(1);
+      expect(started.gameState.players.indexOf(dealers[0])).toBe(started.gameState.dealerIndex);
+    });
+
+    test('AI思考期间重复的下一步不应发起第二次决策请求', async () => {
+      let resolveDecision;
+      aiService.getDecision.mockImplementation(() => new Promise(r => { resolveDecision = r; }));
+      createAndStartGame();
+
+      const first = wsService.handleNextStep();
+      wsService.handleNextStep();
+      expect(aiService.getDecision).toHaveBeenCalledTimes(1);
+
+      resolveDecision({ action: 'fold', amount: 0, thinking: 'x' });
+      await first;
+      expect(wsService.decisionInFlight).toBe(false);
+    });
+
+    test('游戏在AI思考期间被重置时应丢弃过期决策', async () => {
+      let resolveDecision;
+      aiService.getDecision.mockImplementation(() => new Promise(r => { resolveDecision = r; }));
+      createAndStartGame();
+
+      const pending = wsService.handleNextStep();
+      ws.emit('message', JSON.stringify({ type: 'resetGame' }));
+      resolveDecision({ action: 'fold', amount: 0, thinking: 'x' });
+      await pending;
+
+      expect(ws.sent.some(m => m.type === 'playerActionProcessed')).toBe(false);
+      expect(ws.sent.some(m => m.type === 'error')).toBe(false);
+    });
+
+    test('一手牌结束时应推送handResult', async () => {
+      aiService.getDecision.mockResolvedValue({ action: 'fold', amount: 0, thinking: 'x' });
+      createAndStartGame();
+
+      await wsService.handleNextStep();
+      await wsService.handleNextStep();
+
+      const result = ws.sent.find(m => m.type === 'handResult');
+      expect(result).toBeDefined();
+      expect(result.result.winners).toHaveLength(1);
+      expect(result.result.isShowdown).toBe(false);
+    });
+
+    test('思考记录只保留最近的100条', () => {
+      createAndStartGame();
+      const player = wsService.currentGameState.players[0];
+      for (let i = 0; i < 120; i++) {
+        wsService.addThinkingRecord(player, `t${i}`, 'check');
+      }
+      const history = wsService.currentGameState.thinkingHistory;
+      expect(history).toHaveLength(100);
+      expect(history[99].content).toBe('t119');
+    });
+  });
 });

@@ -4,7 +4,7 @@ import logging
 from .base_agent import BaseAgent
 from ..exceptions import APIError, DecisionError
 from ..config.agent_config import get_default_model
-from ..prompts.prompt_utils import build_prompt, parse_response
+from ..prompts.prompt_utils import build_prompt, extract_speech, parse_response
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class GeminiAgent(BaseAgent):
                 prompt,
                 generation_config={
                     "temperature": self.temperature,
-                    "max_output_tokens": 1024,
+                    "max_output_tokens": 2048,
                 }
             )
 
@@ -80,6 +80,7 @@ class GeminiAgent(BaseAgent):
             action, amount, thought_process = parse_response(
                 response_text, valid_actions, min_bet, max_bet
             )
+            self.last_speech = extract_speech(response_text)
 
             # 验证决策，无效时回退为默认动作
             action, amount = self._sanitize_decision(action, amount, valid_actions, min_bet, max_bet)

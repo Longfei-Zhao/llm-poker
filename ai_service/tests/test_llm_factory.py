@@ -68,6 +68,6 @@ def test_display_provider():
 
 def test_default_models():
     """测试默认模型来自配置表"""
-    assert get_default_model('anthropic') == 'claude-3-7-sonnet-20250219'
-    assert get_default_model('openai') == 'gpt-4o'
+    assert get_default_model('anthropic') == 'claude-fable-5-1'
+    assert get_default_model('openai') == 'gpt-6-astra'
     assert get_default_model('invalid') is None

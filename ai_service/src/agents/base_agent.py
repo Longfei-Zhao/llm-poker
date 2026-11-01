@@ -14,6 +14,9 @@ class BaseAgent(ABC):
     # 提供商标识，子类在__init__中覆盖
     provider: str = "unknown"
 
+    # 最近一次决策里说出口的台词，由各代理在make_decision中设置
+    last_speech: Optional[str] = None
+
     def __init__(self, player_id: str, name: str):
         """
         初始化代理。
@@ -143,6 +146,10 @@ class BaseAgent(ABC):
         Returns:
             str: 当前玩家ID
         """
+        # 后端会注明行动玩家在牌桌上的ID；多桌并行时代理ID带桌号前缀，和牌桌上的ID不同
+        if game_state.get('actingPlayerId'):
+            return game_state['actingPlayerId']
+
         # 如果已知玩家ID，直接返回
         if self.player_id:
             return self.player_id

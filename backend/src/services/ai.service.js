@@ -5,7 +5,8 @@ class AIService {
     constructor() {
         this.client = axios.create({
             baseURL: config.AI_SERVICE_URL || 'http://localhost:8000',
-            timeout: 30000 // 30秒超时
+            // AI服务内部单次调用30秒且带重试，后端必须等得比它久，否则会提前放弃并回退成check/fold
+            timeout: config.AI_REQUEST_TIMEOUT_MS
         });
         
         console.log(`AI服务初始化: ${config.AI_SERVICE_URL || 'http://localhost:8000'}`);
@@ -17,10 +18,11 @@ class AIService {
      * @param {string} name - 玩家名称
      * @param {string} provider - LLM提供商
      * @param {string} [model] - 模型名称（可选）
-     * @param {number} [temperature=0.7] - 采样温度（可选）
+     * @param {number} [temperature=0.7] - 采样温度（可选，部分新模型会忽略）
+     * @param {string} [effort] - 推理强度（可选）
      * @returns {Promise<Object>} 创建结果
      */
-    async createAgent(playerId, name, provider, model = null, temperature = 0.7) {
+    async createAgent(playerId, name, provider, model = null, temperature = 0.7, effort = null) {
         try {
             console.log(`尝试创建AI代理: ${name}, provider: ${provider}, model: ${model}`);
             
@@ -29,7 +31,8 @@ class AIService {
                 name,
                 provider,
                 model,
-                temperature
+                temperature,
+                effort
             });
             
             console.log(`AI代理创建成功: ${playerId}`);
@@ -84,11 +87,13 @@ class AIService {
             const amount = response.data.amount !== undefined ? response.data.amount : 0;
             const thinking = response.data.thinking || `AI玩家${playerId}使用${gameState.players.find(p => p.id === playerId)?.aiModel || '未知模型'}思考后选择了${action}`;
             
-            // 返回思考过程和决策结果
+            // 返回思考过程和决策结果；inner是模型原始心声（可能为空），speech是说出口的台词
             return {
                 action,
                 amount,
-                thinking
+                thinking,
+                inner: response.data.thinking || null,
+                speech: response.data.speech || null
             };
         } catch (error) {
             console.error('获取AI决策失败:', error.message);
@@ -107,6 +112,17 @@ class AIService {
                 throw new Error(`获取AI决策失败: ${error.message}`);
             }
         }
+    }
+
+    /**
+     * 让AI代理不打牌、只按提示说一句话（比如一手结束后的赛后感言）
+     * @param {string} playerId - 玩家ID
+     * @param {string} prompt - 提示词
+     * @returns {Promise<string>} 说的话
+     */
+    async chat(playerId, prompt) {
+        const response = await this.client.post('/api/chat', { player_id: playerId, prompt });
+        return response.data.text;
     }
 
     /**

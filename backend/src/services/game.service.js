@@ -54,8 +54,8 @@ class GameService {
     return gameState;
   }
 
-  // 开始游戏
-  startGame(gameId) {
+  // 开始游戏。options.deck 可传入事先排好的牌堆（从末尾往前发），用于剧本发牌
+  startGame(gameId, options = {}) {
     const game = this.games.get(gameId);
     if (!game) throw new Error('Game not found');
     // 允许从waiting或finished状态开始游戏
@@ -64,14 +64,19 @@ class GameService {
     if (game.players.length < 2) throw new Error('Not enough players');
 
     // 重置游戏状态
-    game.deck = this.createDeck();
-    this.shuffleDeck(game.deck);
+    if (options.deck) {
+      game.deck = [...options.deck];
+    } else {
+      game.deck = this.createDeck();
+      this.shuffleDeck(game.deck);
+    }
     game.communityCards = [];
     game.pot = 0;
     game.currentBet = 0;
     game.lastRaiseIndex = -1;
     game.lastRaiseAmount = 0;
     game.actionHistory = []; // 重置行动历史
+    game.lastHandResult = null;
 
     // 重置玩家状态
     game.players.forEach(player => {
@@ -305,6 +310,32 @@ class GameService {
     return game;
   }
 
+  // 计算玩家当前可选的动作和加注范围（加注金额都是本轮总下注额，不是增量）
+  getLegalActions(game, player) {
+    const validActions = ['fold'];
+    const toCall = game.currentBet - player.bet;
+
+    // 下注已对齐（含大盲preflop无人加注的情况）时可以check
+    if (toCall <= 0) validActions.push('check');
+    if (player.chips > 0) validActions.push('allin');
+    if (toCall > 0 && toCall <= player.chips) validActions.push('call');
+
+    // 最小加注：当前注 + max(上次加注增量, 大盲)
+    const minRaiseTo = game.currentBet === 0
+      ? game.bigBlind
+      : game.currentBet + Math.max(game.lastRaiseAmount || 0, game.bigBlind);
+    const playerTotal = player.chips + player.bet;
+    if (player.chips > 0 && playerTotal >= minRaiseTo && minRaiseTo > game.currentBet) {
+      validActions.push('raise');
+    }
+
+    return {
+      validActions,
+      minBet: Math.min(minRaiseTo, playerTotal),
+      maxBet: playerTotal
+    };
+  }
+
   // 获取游戏状态
   getGameState(gameId) {
     const game = this.games.get(gameId);
@@ -390,11 +421,12 @@ class GameService {
       return game;
     }
 
-    // 重置玩家行动状态
+    // 重置玩家行动状态；上一街的动作标签也清掉，否则新一街会显示"跟注 0"
     game.players.forEach(player => {
       if (player.isActive) {
         player.hasActed = false;
         player.bet = 0;
+        if (!player.isAllIn) player.action = null;
       }
     });
 
@@ -499,7 +531,20 @@ class GameService {
       }
     }
 
+    // 多人到河牌才需要亮牌评牌；其余人都弃牌时赢家不亮牌
+    const isShowdown = activePlayers.length > 1;
+    const handNames = {};
+    const handRanks = {};
+    if (isShowdown) {
+      for (const p of activePlayers) {
+        const solved = Hand.solve([...p.cards, ...game.communityCards]);
+        handNames[p.id] = solved.descr;
+        handRanks[p.id] = solved.name;
+      }
+    }
+
     // 逐池评牌并分配（只有一名有效玩家时无需评牌）
+    const winnings = {};
     for (const pot of pots) {
       let winners;
       if (pot.eligible.length === 1) {
@@ -514,26 +559,42 @@ class GameService {
           .filter(ph => winningHands.includes(ph.hand))
           .map(ph => ph.player);
       }
-      this.distributePot(game, pot.amount, winners);
+      this.distributePot(game, pot.amount, winners, winnings);
     }
+
+    // 记录本手结果，供前端展示赢家
+    game.lastHandResult = {
+      round: game.round,
+      isShowdown,
+      winners: Object.entries(winnings).map(([playerId, amount]) => ({
+        playerId,
+        amount,
+        handName: handNames[playerId] || null,
+        handRank: handRanks[playerId] || null
+      })),
+      hands: handNames,
+      ranks: handRanks
+    };
 
     game.pot = 0;
     game.state = 'finished';
   }
 
   // 分配单个奖池，余数筹码从庄家左侧起按座位顺序分给赢家
-  distributePot(game, amount, winners) {
+  distributePot(game, amount, winners, winnings = {}) {
     const share = Math.floor(amount / winners.length);
     let remainder = amount - share * winners.length;
     const ordered = [...winners].sort(
       (a, b) => this.seatOffsetFromDealer(game, a) - this.seatOffsetFromDealer(game, b)
     );
     for (const player of ordered) {
-      player.chips += share;
+      let won = share;
       if (remainder > 0) {
-        player.chips += 1;
+        won += 1;
         remainder--;
       }
+      player.chips += won;
+      winnings[player.id] = (winnings[player.id] || 0) + won;
     }
   }
 
@@ -629,22 +690,14 @@ class GameService {
     };
 
     // 根据玩家数量动态计算其他位置
-    if (totalPlayers <= 3) {
-      return positionNames[relativePos] || `P${relativePos}`;
-    } else {
-      if (relativePos >= 3) {
-        // 3人以上桌子的其他位置
-        const positions = ["UTG", "UTG+1", "MP", "HJ", "CO"];
-        const index = relativePos - 3;
-        if (index < positions.length) {
-          return positions[index];
-        } else {
-          return `P${relativePos}`;
-        }
-      } else {
-        return positionNames[relativePos];
-      }
+    if (relativePos <= 2) {
+      return positionNames[relativePos];
     }
+    // 盲注后第一位总是UTG，其余位置从按钮往前倒数（CO、HJ、MP、UTG+1），
+    // 这样6人桌是UTG/HJ/CO而不是UTG/UTG+1/MP
+    if (relativePos === 3) return 'UTG';
+    const fromButton = totalPlayers - relativePos;
+    return ['CO', 'HJ', 'MP', 'UTG+1'][fromButton - 1] || `P${relativePos}`;
   }
 }
 

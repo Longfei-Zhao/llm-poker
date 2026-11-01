@@ -102,6 +102,21 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
 
       // 监听WebSocket发送的AI代理创建成功
       _wsService.aiAgentCreatedStream.listen(_onAIAgentCreated);
+
+      // 监听AI开始思考/思考完成，驱动"思考中"状态
+      _wsService.thinkingUpdatedStream.listen(_onThinkingUpdated);
+    });
+  }
+
+  // aiThinking消息带isProcessing=true；随后的thinkingUpdated记录表示思考结束
+  void _onThinkingUpdated(Map<String, dynamic> data) {
+    if (!mounted) return;
+    final playerId = data['playerId']?.toString();
+    if (playerId == null) return;
+    setState(() {
+      _aiConnectionStatus[playerId] = data['isProcessing'] == true
+          ? AIServiceStatus.thinking
+          : AIServiceStatus.created;
     });
   }
 
@@ -271,6 +286,14 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
         _wsService.getGameState();
         break;
 
+      case 'handResult':
+        // 每手牌结束时后端单独推送一次，避免随状态更新重复弹出
+        final dynamic result = data['result'];
+        if (result is Map) {
+          _showWinnersInfo(result['winners']);
+        }
+        break;
+
       case 'gameCreated':
       case 'gameStarted':
       case 'gameState':
@@ -358,11 +381,6 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             );
           }
       }
-
-      // 处理获胜者信息
-      if (json['winners'] != null) {
-        _showWinnersInfo(json['winners']);
-      }
     } catch (e) {
       if (kDebugMode) {
         debugPrint('解析游戏状态更新错误($messageType): $e');
@@ -385,6 +403,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
     for (final winner in winners) {
       final playerId = winner['playerId'];
       final amount = winner['amount'];
+      final handName = winner['handName'];
 
       // 查找玩家
       final player =
@@ -416,6 +435,11 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
                   text: ' 筹码',
                   style: TextStyle(color: Colors.white),
                 ),
+                if (handName != null)
+                  TextSpan(
+                    text: '（$handName）',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
               ],
             ),
           ),
@@ -431,7 +455,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
-                '游戏结束，获胜者：',
+                '本手结束，获胜者：',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,

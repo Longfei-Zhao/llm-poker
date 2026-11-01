@@ -213,3 +213,16 @@ def test_list_agents(client):
     assert data[0]["provider"] == "anthropic"
     assert data[0]["model"] == get_default_model("anthropic")
     assert data[0]["status"] == "active"
+
+def test_chat_returns_agent_text(client):
+    """赛后感言：代理只说一句话，不做决策"""
+    with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test_key'}):
+        client.post("/api/agents", json={"player_id": "p1", "name": "P1", "provider": "anthropic"})
+    with patch.object(AnthropicAgent, "chat", new=AsyncMock(return_value="这把牌你命好")):
+        response = client.post("/api/chat", json={"player_id": "p1", "prompt": "说一句"})
+    assert response.status_code == 200
+    assert response.json() == {"text": "这把牌你命好"}
+
+def test_chat_player_not_found(client):
+    response = client.post("/api/chat", json={"player_id": "nobody", "prompt": "说一句"})
+    assert response.status_code == 404
