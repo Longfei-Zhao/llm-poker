@@ -109,6 +109,7 @@ app.get('/api/hands', (req, res) => {
         id: log.id,
         session: log.session,
         hand: log.hand,
+        title: log.title || null,
         startedAt: log.startedAt,
         players: log.players.length,
         winners: ((log.result && log.result.winners) || []).map(w => ({ name: name(w.playerId), amount: w.amount }))
@@ -132,6 +133,7 @@ app.get('/api/hands/:id', (req, res) => {
 
 // 回放页面
 app.use('/replay', express.static(path.join(__dirname, '..', 'public', 'replay')));
+app.use('/voice', express.static(config.VOICE_DIR));
 
 // 创建HTTP服务器
 const server = http.createServer(app);

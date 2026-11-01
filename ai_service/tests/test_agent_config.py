@@ -21,7 +21,7 @@ def test_provider_table_completeness():
 def test_get_provider_config():
     """测试获取提供商配置"""
     config = get_provider_config("anthropic")
-    assert config.default_model == "claude-sonnet-5-5"
+    assert config.default_model == "claude-fable-5-1"
     assert config.api_key_env == "ANTHROPIC_API_KEY"
 
     with pytest.raises(KeyError):
@@ -29,8 +29,8 @@ def test_get_provider_config():
 
 def test_get_default_model():
     """测试获取默认模型"""
-    assert get_default_model("openai") == "gpt-4o"
-    assert get_default_model("deepseek") == "deepseek-chat"
+    assert get_default_model("openai") == "gpt-6-astra"
+    assert get_default_model("deepseek") == "deepseek-v4-pro"
     assert get_default_model("invalid") is None
 
 def test_get_api_key():
@@ -69,7 +69,7 @@ def test_get_api_base():
 def test_openai_compatible_providers():
     """测试OpenAI兼容提供商列表"""
     providers = openai_compatible_providers()
-    assert set(providers) == {"openai", "deepseek", "aliyun", "xai", "perplexity", "moonshot", "doubao"}
+    assert set(providers) == {"openai", "deepseek", "aliyun", "xai", "perplexity", "moonshot", "doubao", "fal"}
 
 def test_aliases():
     """测试别名映射"""

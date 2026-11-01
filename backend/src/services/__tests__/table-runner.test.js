@@ -77,7 +77,9 @@ describe('TableRunner', () => {
     const results = [];
     await runner.run(1, r => results.push(r));
     const acts = results[0].log.events.filter(e => e.t === 'act');
-    expect(acts.some(a => a.corrected)).toBe(true);
+    // 第一次调用失败、之后返回非法动作，两种情况都要标记为系统代打
+    expect(acts[0].corrected).toBe(true);
+    expect(acts.every(a => a.corrected)).toBe(true);
     expect(results[0].log.result).toBeTruthy();
   });
 
@@ -86,6 +88,18 @@ describe('TableRunner', () => {
     ai.createAgent.mockRejectedValueOnce(new Error('no key')).mockRejectedValueOnce(new Error('no key'));
     const runner = new TableRunner({ ai, characters, handsDir: dir });
     await expect(runner.run(1)).rejects.toThrow('不足两人');
+  });
+
+  test('剧本牌同时跑时每手用自己的代理ID，记录互不干扰', async () => {
+    const ai = mockAI((playerId, view, validActions) => ({ action: validActions.includes('check') ? 'check' : 'fold', amount: 0 }));
+    const runners = [1, 2].map(t => new TableRunner({ ai, characters, handsDir: dir, stack: 1000, smallBlind: 5, bigBlind: 10, session: `s-t${t}`, agentPrefix: `t${t}-` }));
+    await Promise.all(runners.map(r => r.run(2)));
+    const agentIds = ai.createAgent.mock.calls.map(c => c[0]);
+    expect(agentIds).toEqual(expect.arrayContaining(['t1-claude', 't2-claude']));
+    expect(new Set(ai.getDecision.mock.calls.map(c => c[0].slice(0, 3)))).toEqual(new Set(['t1-', 't2-']));
+    // 代理ID带桌号前缀，但视图里注明了牌桌上的真实ID，模型才能找到自己
+    for (const [agentId, view] of ai.getDecision.mock.calls) expect(agentId.endsWith(view.actingPlayerId)).toBe(true);
+    expect(fs.readdirSync(dir).sort()).toEqual(['s-t1-001.json', 's-t1-002.json', 's-t2-001.json', 's-t2-002.json']);
   });
 
   test('连打多手时按钮轮转且记录编号递增', async () => {

@@ -5,7 +5,7 @@ from openai import AsyncOpenAI
 from openai import AuthenticationError, RateLimitError, APIError as OpenAIAPIError
 from .base_agent import BaseAgent
 from ..exceptions import APIError, DecisionError
-from ..config.agent_config import get_api_base, get_default_model
+from ..config.agent_config import DEFAULT_EFFORT, LLM_TIMEOUT, get_api_base, get_default_model
 from ..prompts.prompt_utils import build_prompt, extract_speech, parse_response
 import re
 
@@ -31,6 +31,7 @@ class OpenAICompatibleAgent(BaseAgent):
         model: Optional[str] = None,
         temperature: float = 0.7,
         provider: str = "openai",
+        effort: Optional[str] = None,
         **kwargs: Any
     ):
         """
@@ -50,6 +51,7 @@ class OpenAICompatibleAgent(BaseAgent):
         self.model = model or get_default_model(provider) or get_default_model("openai")
         self.provider = provider
         self.temperature = temperature
+        self.effort = effort or DEFAULT_EFFORT
 
         # 根据提供商配置API基础URL（配置表提供默认值，环境变量可覆盖）
         self.api_base = kwargs.get('api_base') or get_api_base(provider) or get_api_base("openai")
@@ -58,15 +60,19 @@ class OpenAICompatibleAgent(BaseAgent):
         logger.info("初始化%s代理 - 玩家ID: %s, 名称: %s, 模型: %s, API基础URL: %s",
                     provider, player_id, name, self.model, self.api_base)
 
-        timeout = 30.0  # 默认超时时间
+        # fal的网关用 Authorization: Key <FAL_KEY> 认证，而不是OpenAI默认的Bearer
+        client_kwargs = {}
+        if provider == "fal":
+            client_kwargs["default_headers"] = {"Authorization": f"Key {api_key}"}
 
         try:
             # 重试交给客户端内置机制处理（指数退避），不再手动写重试循环
             self.client = AsyncOpenAI(
-                api_key=api_key,
+                api_key=api_key or "not-needed",
                 base_url=self.api_base,
-                timeout=timeout,  # 设置超时时间
-                max_retries=3,    # 设置最大重试次数
+                timeout=LLM_TIMEOUT,
+                max_retries=1,
+                **client_kwargs,
             )
         except Exception as e:
             logger.error("%s客户端初始化失败: %s", provider, e)
@@ -142,34 +148,45 @@ class OpenAICompatibleAgent(BaseAgent):
                 ],
             }
 
-            # 针对不同模型使用特殊参数
-            if self.model == "gpt-4o-mini":
-                # GPT-4O-Mini模型的特殊处理
-                # 注意：GPT-4O-Mini模型有以下特殊要求：
-                # 1. 使用max_completion_tokens而不是max_tokens参数
-                # 2. 不支持temperature参数（只接受默认值1）
-                # 3. 不支持response_format参数
-                kwargs["max_completion_tokens"] = 2048
+            # 针对不同提供商使用不同参数
+            if self.provider == "openai":
+                # OpenAI当前模型：不接受temperature，用max_completion_tokens（推理token也计入），思考深度用reasoning_effort
+                kwargs["max_completion_tokens"] = 16000
+                kwargs["reasoning_effort"] = self.effort
+                kwargs["response_format"] = {"type": "json_object"}
             elif self.provider == "perplexity":
                 # Perplexity API不支持response_format参数
                 kwargs["max_tokens"] = 2048
                 kwargs["temperature"] = self.temperature
             else:
-                # 其他模型的通用处理
-                kwargs["max_tokens"] = 2048
+                # 其他模型的通用处理；推理模型的思考也算在max_tokens里，留足空间
+                # 豆包、DeepSeek这类推理模型一次可能想一万多token，上限给足，避免正文被截断成空
+                kwargs["max_tokens"] = 32000
                 kwargs["temperature"] = self.temperature
                 kwargs["response_format"] = {"type": "json_object"}
+                if self.provider == "fal":
+                    # 经OpenRouter控制推理强度，不设的话部分模型会想很久
+                    kwargs["extra_body"] = {"reasoning": {"effort": self.effort}}
 
             # 调用OpenAI兼容API
             logger.info("调用%s API - 模型: %s, URL: %s", self.provider, self.model, self.api_base)
 
-            start_time = time.time()
-            response = await self.client.chat.completions.create(**kwargs)
-            response_time = time.time() - start_time
+            # 推理模型偶尔把输出额度全用在思考上、返回空内容，重试一次
+            response_content = None
+            for attempt in range(2):
+                start_time = time.time()
+                response = await self.client.chat.completions.create(**kwargs)
+                response_time = time.time() - start_time
+                response_content = response.choices[0].message.content
+                if response_content:
+                    break
+                logger.warning("%s %s 返回空内容(finish_reason=%s)，耗时%.2f秒，第%d次",
+                               self.provider, self.model, response.choices[0].finish_reason, response_time, attempt + 1)
+            if not response_content:
+                raise APIError(f"{self.provider} {self.model} 连续返回空内容")
             logger.info("%s代理成功生成决策，耗时: %.2f秒", self.provider, response_time)
 
             # 解析响应
-            response_content = response.choices[0].message.content
             logger.debug("%s %s 的原始响应:\n%s", self.provider, self.model, response_content)
 
             # 针对DeepSeek-Reasoner等推理模型的特殊处理

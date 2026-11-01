@@ -1,7 +1,8 @@
 // 发给AI服务的玩家视角，以及对AI决策的合法化处理。实时WebSocket模式和批量跑牌共用。
 
 // 构建某个玩家可见的游戏视图：只含他自己的手牌，不含他人手牌与牌堆。
-// extras.persona 是该角色的人设，extras.tableTalk 是本手牌里大家说出口的台词（不含心声）
+// extras.persona 是该角色的人设，extras.tableTalk 是本手牌里大家说出口的台词（不含心声），
+// extras.roster 是同桌其他人的公众形象（可以拿来互相调侃）
 function buildPlayerView(game, actingPlayer, extras = {}) {
   return {
     id: game.id,
@@ -18,8 +19,10 @@ function buildPlayerView(game, actingPlayer, extras = {}) {
     currentPlayerIndex: game.currentPlayerIndex,
     communityCards: [...(game.communityCards || [])],
     actionHistory: game.actionHistory || [],
+    actingPlayerId: actingPlayer.id,
     persona: extras.persona || null,
     tableTalk: [...(extras.tableTalk || [])],
+    roster: (extras.roster || []).filter(r => r.id !== actingPlayer.id).map(r => ({ name: r.name, image: r.image })),
     players: game.players.map(p => ({
       id: p.id,
       name: p.name,

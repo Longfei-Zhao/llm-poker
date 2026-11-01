@@ -44,12 +44,10 @@ body { font-family: var(--body); }
 /* the room */
 #cam { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; transition: transform var(--camt, 1.4s) cubic-bezier(0.45, 0, 0.2, 1); }
 #world { position: absolute; inset: 0; }
-#city { position: absolute; left: -20px; top: -20px; width: 1640px; height: 380px; filter: blur(2.5px) brightness(0.62) saturate(0.85); }
-#rain { position: absolute; left: 0; top: 0; width: 1600px; height: 344px; pointer-events: none; }
-.mullion { position: absolute; top: 0; width: 10px; height: 352px; background: #04050A; box-shadow: 0 0 12px rgba(0,0,0,0.8); }
-.wall { position: absolute; left: 0; top: 344px; width: 1600px; height: 556px; background: linear-gradient(#0B0A10 0%, #08070C 40%, #040306 100%); box-shadow: 0 -2px 0 rgba(255,255,255,0.05), 0 -30px 50px rgba(0,0,0,0.7); }
+/* 房间和牌桌是一整张美漫背景图（backdrop.jpg），台布的椭圆和下面的发牌、筹码坐标严格对齐：中心 (800,430)，台布半径 578×217 */
+.backdrop { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; filter: brightness(0.82) saturate(0.95); }
+.bdext { position: absolute; left: -240px; top: -120px; width: 2080px; height: 1140px; background: url(backdrop.jpg) center / cover; filter: blur(14px) brightness(0.3); }
 .spill { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 48% 60% at 52% -8%, rgba(255,232,190,0.13), transparent 70%); }
-.tshadow { position: absolute; left: 150px; top: 330px; width: 1300px; height: 440px; border-radius: 50%; background: rgba(0,0,0,0.9); filter: blur(36px); }
 #tablecv { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; }
 .pool { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 34% 26% at 50% 45%, rgba(255,238,205,0.09), transparent 75%); }
 .vig { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 80% 75% at 50% 46%, transparent 58%, rgba(0,0,0,0.72) 100%); z-index: 60; }
@@ -60,14 +58,6 @@ body { font-family: var(--body); }
 #pot .lbl { display: flex; flex-direction: column; align-items: flex-start; line-height: 1; }
 #pot small { font-size: 12px; letter-spacing: 3px; color: rgba(214,232,222,0.7); margin-bottom: 4px; }
 #pot b { font: 500 32px var(--num); color: var(--gold); font-variant-numeric: tabular-nums; }
-#hud { position: absolute; left: 34px; top: 26px; z-index: 70; display: flex; flex-direction: column; gap: 4px; }
-#hud .h { font-family: var(--display); font-size: 26px; color: var(--text); }
-#hud .sub { font-size: 13px; color: var(--muted); letter-spacing: 1px; }
-#hud .sub b { color: var(--gold); font-weight: 700; }
-#tick { position: absolute; left: 50%; top: 822px; transform: translate(-50%, 8px); max-width: 900px; z-index: 70; padding: 8px 18px; border-radius: 8px; background: rgba(5,6,11,0.85); box-shadow: inset 0 0 0 1px rgba(233,196,106,0.35); display: flex; gap: 12px; align-items: baseline; opacity: 0; transition: opacity 0.4s, transform 0.4s; white-space: nowrap; }
-#tick.show { opacity: 1; transform: translate(-50%, 0); }
-#tick span { font-family: var(--display); font-size: 16px; color: var(--gold); }
-#tick p { margin: 0; font-size: 16px; }
 
 /* seats */
 .seat { position: absolute; width: 170px; height: 236px; transform: translate(-50%, -100%) scale(var(--sc)); transform-origin: 50% 100%; transition: opacity 0.5s; }
@@ -77,6 +67,15 @@ body { font-family: var(--body); }
 .seat.on .bust svg { filter: drop-shadow(0 0 1.5px var(--c)) drop-shadow(0 0 14px var(--c)) drop-shadow(0 0 30px color-mix(in srgb, var(--c) 60%, transparent)); }
 .seat.fold { opacity: 0.42; }
 .seat.fold .bust svg, .seat.lose .bust svg { filter: grayscale(1) brightness(0.8) drop-shadow(0 0 1px #6B6F80); }
+/* 立绘坐在桌边：只露到胸口，下沿渐隐进名牌，颜色描边和剪影一样。
+   渐隐遮罩在图片上，描边发光在外面一层，两个放在同一个元素上发光会照出整块矩形 */
+.bust .glow { position: absolute; inset: 0; filter: drop-shadow(0 0 1px var(--c)) drop-shadow(0 0 8px color-mix(in srgb, var(--c) 55%, transparent)); transition: filter 0.4s; }
+.bust img { position: absolute; left: 50%; top: -6px; width: 178px; transform: translateX(-50%); -webkit-mask-image: linear-gradient(#000 66%, transparent 92%); mask-image: linear-gradient(#000 66%, transparent 92%); }
+.seat.on .bust .glow { filter: drop-shadow(0 0 2px var(--c)) drop-shadow(0 0 16px var(--c)) drop-shadow(0 0 32px color-mix(in srgb, var(--c) 60%, transparent)); }
+.seat.fold .bust .glow, .seat.lose .bust .glow { filter: grayscale(1) brightness(0.7); }
+/* 两侧靠上的座位，名牌会被下面那位的立绘挡住，改放到头顶上 */
+.seat.ptop .plate { bottom: auto; top: -38px; }
+.seat.ptop .tag { top: -42px; }
 .plate { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 16px 6px; border-radius: 8px; background: rgba(6,7,13,0.86); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), inset 0 -2px 0 var(--c); white-space: nowrap; }
 .plate b { font-family: var(--display); font-weight: 400; font-size: 20px; line-height: 1.1; }
 .stk { font: 500 15px var(--num); color: var(--gold); font-variant-numeric: tabular-nums; }
@@ -129,25 +128,6 @@ body { font-family: var(--body); }
 #win b { display: block; font: 500 56px var(--num); color: var(--gold); line-height: 1; font-variant-numeric: tabular-nums; }
 
 /* dialogue */
-#dlg { position: absolute; left: 40px; right: 40px; bottom: 28px; height: 206px; transform: translateY(150%); transition: transform 0.5s cubic-bezier(0.2, 0.9, 0.2, 1); z-index: 80; }
-#dlg.show { transform: translateY(0); }
-#dlg .boxbg { position: absolute; inset: 0; background: rgba(7,8,16,0.95); box-shadow: inset 0 0 0 1.5px var(--c), 0 0 40px rgba(0,0,0,0.6); clip-path: polygon(0 0, 100% 0, 100% 100%, 3% 100%, 0 84%); }
-#dlg .port { position: absolute; left: 14px; bottom: 0; width: 290px; height: 344px; overflow: hidden; clip-path: polygon(0 7%, 100% 0, 100% 100%, 0 100%); background: repeating-linear-gradient(135deg, rgba(5,6,11,0.16) 0 6px, transparent 6px 14px), var(--c); }
-#dlg .port svg { position: absolute; left: -10px; bottom: -6px; width: 310px; height: 340px; color: var(--ink); }
-#dlg .name { position: absolute; left: 304px; top: -22px; transform: skewX(-14deg); background: var(--c); padding: 4px 22px; display: flex; gap: 12px; align-items: baseline; }
-#dlg .name > * { transform: skewX(14deg); color: var(--ink); }
-#dlg .name span { font-family: var(--display); font-size: 28px; }
-#dlg .name small { font: 700 14px var(--num); letter-spacing: 2px; }
-#dlg .say { position: absolute; left: 340px; top: 38px; width: 720px; font-size: 32px; font-weight: 900; line-height: 1.38; }
-#dlg .say::after { content: "▌"; color: var(--c); animation: blink 0.7s infinite; }
-#dlg .meta { position: absolute; left: 340px; bottom: 16px; display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 13px; }
-#dlg .wave { display: flex; gap: 3px; align-items: center; height: 24px; }
-#dlg .wave i { width: 4px; background: var(--c); animation: wave 0.6s infinite alternate; }
-#dlg .wave i:nth-child(2) { animation-delay: 0.1s; } #dlg .wave i:nth-child(3) { animation-delay: 0.25s; } #dlg .wave i:nth-child(4) { animation-delay: 0.05s; } #dlg .wave i:nth-child(5) { animation-delay: 0.3s; }
-#dlg .inner { position: absolute; right: 20px; top: 20px; bottom: 20px; width: 420px; box-sizing: border-box; padding: 14px 18px; border-radius: 8px; border: 1.5px dashed rgba(255,255,255,0.3); background: rgba(255,255,255,0.03); opacity: 0; transform: translateX(24px); transition: opacity 0.35s, transform 0.35s; }
-#dlg .inner.show { opacity: 1; transform: none; }
-#dlg .inner h4 { margin: 0 0 6px; font-family: var(--display); font-weight: 400; font-size: 17px; color: #CDD1DF; }
-#dlg .inner p { margin: 0; font-size: 17px; line-height: 1.6; color: #E4E7F0; }
 
 /* all-in cut-in */
 #cut { position: absolute; inset: 0; z-index: 90; pointer-events: none; opacity: 0; }
@@ -158,6 +138,7 @@ body { font-family: var(--body); }
 #cut.go .band { animation: bandIn 0.32s cubic-bezier(0.2, 0.9, 0.2, 1) forwards, lines 0.4s linear infinite; }
 #cut .who { position: absolute; left: 70px; top: 40px; width: 540px; height: 820px; clip-path: polygon(8% 0, 100% 0, 92% 100%, 0 100%); background: #07080F; box-shadow: inset 0 0 0 5px var(--hot); transform: translateX(-120%); }
 #cut .who svg { position: absolute; left: 10px; bottom: 0; width: 520px; height: 572px; color: var(--sil); filter: drop-shadow(0 0 3px var(--hot)) drop-shadow(0 0 24px var(--hot)); }
+#cut .who img { position: absolute; left: 0; top: 30px; width: 540px; filter: drop-shadow(0 0 3px var(--hot)) drop-shadow(0 0 24px var(--hot)); }
 #cut.go .who { animation: whoIn 0.38s 0.08s cubic-bezier(0.2, 0.9, 0.2, 1) forwards; }
 #cut .shout { position: absolute; left: 640px; top: 110px; font-family: var(--brush); font-size: 250px; line-height: 1; color: var(--gold); text-shadow: 7px 7px 0 #05060B; transform: rotate(-9deg) scale(3); opacity: 0; }
 #cut.go .shout { animation: slam 0.3s 0.25s cubic-bezier(0.2, 1.4, 0.4, 1) forwards; }
@@ -196,8 +177,59 @@ body { font-family: var(--body); }
   #world.shake, #cut.go .flash { animation: none; }
   #cut.go .band, #cut.go .shout, #cut.go .sub { animation: none; transform: rotate(-9deg); opacity: 1; }
   #cut.go .who { animation: none; transform: none; }
-  #dlg .wave i, #dlg .say::after { animation: none; }
+  #bar.typing #bar-talk .say::after { animation: none; }
 }
+
+/* letterbox: a thin top bar and a fixed bottom bar for stats and table talk */
+#topbar { position: absolute; left: 0; top: 0; width: 1600px; height: 36px; box-sizing: border-box; padding: 0 28px; background: #000; z-index: 86; display: flex; align-items: center; justify-content: space-between; font-size: 15px; color: var(--muted); letter-spacing: 1px; }
+#topbar .hand { font-family: var(--display); font-size: 18px; color: var(--text); margin-right: 12px; letter-spacing: 0; }
+#topbar b { color: var(--gold); font-weight: 700; }
+#topbar .com { display: flex; align-items: center; gap: 10px; max-width: 980px; white-space: nowrap; overflow: hidden; }
+#topbar .com i { width: 7px; height: 7px; border-radius: 50%; background: var(--hot); flex-shrink: 0; }
+#topbar .com span { font-family: var(--display); color: var(--gold); letter-spacing: 0; }
+#topbar .com em { font-style: normal; color: var(--text); opacity: 0; transition: opacity 0.4s; }
+#topbar .com em.on { opacity: 1; }
+#bar { position: absolute; left: 0; bottom: 0; width: 1600px; height: 200px; background: #000; z-index: 86; }
+#bar .pane { position: absolute; inset: 0; opacity: 0; transition: opacity 0.45s; }
+#bar[data-mode="stats"] #bar-stats, #bar[data-mode="talk"] #bar-talk { opacity: 1; }
+#bar.past #bar-talk { opacity: 0.55; }
+#bar-stats { box-sizing: border-box; padding: 0 48px; display: flex; flex-direction: column; justify-content: center; gap: 16px; }
+#bar-stats .ttl { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); letter-spacing: 2px; }
+#bar-stats .ttl b { color: var(--gold); font-weight: 700; }
+#bar-stats .grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 14px; }
+#bar-stats .cell { border-top: 3px solid var(--c); padding-top: 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#bar-stats .cell b { font-family: var(--display); font-weight: 400; font-size: 20px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#bar-stats .cell span { font: 500 24px var(--num); color: var(--gold); font-variant-numeric: tabular-nums; }
+#bar-stats .cell small { font: 500 14px var(--num); color: var(--muted); font-variant-numeric: tabular-nums; }
+#bar-stats .cell small.up { color: #6FD6A8; }
+#bar-stats .cell small.down { color: #FF8A98; }
+#bar-talk .port { position: absolute; left: 0; bottom: 0; width: 220px; height: 268px; transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.2, 1); }
+#bar.side-r #bar-talk .port { left: auto; right: 0; }
+/* 斜切的色块是背景板；立绘两侧和底部被色块框住，头和肩膀从上沿探出去 */
+#bar-talk .port::before { content: ""; position: absolute; inset: 0; clip-path: polygon(0 14%, 100% 0, 100% 100%, 0 100%); background: repeating-linear-gradient(135deg, rgba(5,6,11,0.16) 0 6px, transparent 6px 14px), var(--c); }
+#bar.side-r #bar-talk .port::before { clip-path: polygon(0 0, 100% 14%, 100% 100%, 0 100%); }
+#bar-talk .port svg { position: absolute; left: 0; bottom: 0; width: 220px; height: 238px; color: var(--ink); }
+#bar-talk .port .fig { position: absolute; left: 0; right: 0; bottom: 0; top: -96px; overflow: hidden; }
+#bar-talk .port img { position: absolute; left: 50%; top: 0; width: 280px; transform: translateX(-50%); filter: drop-shadow(0 8px 12px rgba(5,6,11,0.5)); }
+#bar-talk .body { position: absolute; left: 256px; right: 40px; top: 26px; display: flex; flex-direction: column; gap: 10px; }
+#bar.side-r #bar-talk .body { left: 40px; right: 256px; text-align: right; }
+#bar.side-r #bar-talk .who { justify-content: flex-end; }
+#bar.full #bar-talk .body { right: 540px; }
+#bar.full.side-r #bar-talk .body { left: 540px; right: 256px; }
+#bar-talk .who { display: flex; align-items: baseline; gap: 12px; }
+#bar-talk .who span { font-family: var(--display); font-size: 26px; color: var(--c); }
+#bar-talk .who small { font: 700 13px var(--num); letter-spacing: 2px; color: var(--muted); }
+#bar-talk .who em { font-style: normal; font-size: 13px; color: var(--muted); }
+#bar-talk .say { font-size: 30px; font-weight: 900; line-height: 1.4; color: var(--text); }
+#bar.typing #bar-talk .say::after { content: "▌"; color: var(--c); animation: blink 0.7s infinite; }
+#bar.thought #bar-talk .say { font-size: 25px; font-weight: 500; line-height: 1.55; color: #D9DCE6; }
+#bar.thought #bar-talk .say::before { content: "（心声）"; color: var(--c); font-weight: 700; }
+#bar.act #bar-talk .say { font-size: 22px; font-weight: 500; color: var(--muted); }
+#bar-talk .inner { position: absolute; right: 36px; top: 24px; bottom: 24px; width: 470px; box-sizing: border-box; padding: 4px 0 0 24px; border-left: 2px dashed rgba(255,255,255,0.28); opacity: 0; transition: opacity 0.35s; }
+#bar.side-r #bar-talk .inner { right: auto; left: 36px; padding: 4px 24px 0 0; border-left: 0; border-right: 2px dashed rgba(255,255,255,0.28); text-align: right; }
+#bar-talk .inner.show { opacity: 1; }
+#bar-talk .inner h4 { margin: 0 0 6px; font-family: var(--display); font-weight: 400; font-size: 17px; color: #CDD1DF; }
+#bar-talk .inner p { margin: 0; font-size: 17px; line-height: 1.6; color: #E4E7F0; }
 
 /* replay page additions */
 body { margin: 0; }
@@ -207,9 +239,6 @@ body { margin: 0; }
 .picker label { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--muted); min-height: 44px; cursor: pointer; }
 .picker input { width: 18px; height: 18px; accent-color: var(--gold); }
 .src { font-size: 12px; color: var(--muted); }
-#dlg.quick { transition-duration: 0.32s; }
-#dlg.quick .inner { display: none; }
-#dlg.quick .say { width: 1100px; font-size: 30px; top: 44px; }
 </style>
 
 <div class="wrap">
@@ -221,14 +250,9 @@ body { margin: 0; }
     <div class="vp" id="vp">
       <div class="stage" id="stage">
         <div id="cam"><div id="world">
-          <canvas id="city" width="1640" height="380"></canvas>
-          <canvas id="rain" width="1600" height="344"></canvas>
-          <div class="mullion" style="left: 395px"></div>
-          <div class="mullion" style="left: 795px"></div>
-          <div class="mullion" style="left: 1195px"></div>
-          <div class="wall"></div>
+          <div class="bdext"></div>
+          <img class="backdrop" src="backdrop.jpg" alt="">
           <div class="spill"></div>
-          <div class="tshadow"></div>
           <canvas id="tablecv"></canvas>
           <div class="pool"></div>
           <div id="pot"><div id="potchips"></div><div class="lbl"><small>底池</small><b id="potn">0</b></div></div>
@@ -236,16 +260,15 @@ body { margin: 0; }
           <div id="dyn"></div>
         </div></div>
         <div class="vig"></div>
-        <div id="hud"><div class="h" id="hudh">第 1 手</div><div class="sub"><b id="st">发牌</b> · <span id="blinds"></span></div></div>
-        <div id="tick"><span>解说 · 老K</span><p id="tickp"></p></div>
+        <div id="topbar"><div><span class="hand" id="tbhand">第 1 手</span><b id="st">发牌</b> · <span id="blinds"></span></div><div class="com"><i></i><span>解说 · 老K</span><em id="tickp"></em></div></div>
         <div id="win"><small>WINNER</small><strong id="winn"></strong><b id="wina"></b></div>
-        <div id="dlg">
-          <div class="boxbg"></div>
-          <div class="port" id="dport"></div>
-          <div class="name" id="dname"></div>
-          <div class="say" id="dsay"></div>
-          <div class="meta"><div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><span>台词 · 全桌都听得到</span></div>
-          <div class="inner" id="dinner"><h4>心声 · 只有观众听得到</h4><p id="dinnerp"></p></div>
+        <div id="bar" data-mode="stats">
+          <div class="pane" id="bar-stats"><div class="ttl"><span id="statttl"></span><span id="statsub"></span></div><div class="grid" id="statgrid"></div></div>
+          <div class="pane" id="bar-talk">
+            <div class="port" id="dport"></div>
+            <div class="body"><div class="who" id="dname"></div><div class="say" id="dsay"></div></div>
+            <div class="inner" id="dinner"><h4>心声 · 只有观众听得到</h4><p id="dinnerp"></p></div>
+          </div>
         </div>
         <div id="cut">
           <div class="dim"></div>
@@ -272,6 +295,7 @@ body { margin: 0; }
       <button type="button" id="pause">暂停</button>
       <button type="button" class="ghost" id="replay">重播</button>
       <button type="button" class="ghost" id="speed">1× 速度</button>
+      <button type="button" class="ghost" id="mute">声音 开</button>
     </div>
     <div class="chaps" id="chaps" aria-label="跳到"></div>
   </div>
@@ -286,6 +310,7 @@ body { margin: 0; }
   </div>
 </div>
 
+<script src="director.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const stage = $('#stage'), world = $('#world'), dyn = $('#dyn'), seatsEl = $('#seats');
@@ -303,12 +328,12 @@ const SAMPLE = {
   id: 'sample-037', session: 'sample', hand: 37, blinds: [50, 100], button: 'kimi',
   players: [
     { id: 'deepseek', name: '老深', label: 'DeepSeek', color: '#22D3EE', look: 'deep', stack: 11800, cards: ['Qc', 'Jd'] },
-    { id: 'gpt', name: 'GPT 总', label: 'GPT', color: '#2BD99F', look: 'gpt', stack: 6420, cards: ['Jh', 'Th'] },
+    { id: 'gpt', name: '开总', label: 'GPT', color: '#2BD99F', look: 'gpt', stack: 6420, cards: ['Jh', 'Th'] },
     { id: 'grok', name: '狂客', label: 'Grok', color: '#FF2E7E', look: 'grok', stack: 6750, cards: ['Qs', 'Qd'] },
     { id: 'gemini', name: '谷大小姐', label: 'Gemini', color: '#6E8BFF', look: 'gem', stack: 15100, cards: ['Ad', '3h'] },
     { id: 'doubao', name: '豆包', label: '豆包', color: '#F9A8D4', look: 'dou', stack: 4060, cards: ['6s', '5s'] },
     { id: 'qwen', name: '千问', label: 'Qwen', color: '#A78BFA', look: 'qwen', stack: 9500, cards: ['8d', '8s'] },
-    { id: 'kimi', name: 'Kimi', label: 'Kimi', color: '#E5E7EB', look: 'kimi', stack: 8340, cards: ['Tc', '9d'] },
+    { id: 'kimi', name: '月学姐', label: 'Kimi', color: '#E5E7EB', look: 'kimi', stack: 8340, cards: ['Tc', '9d'] },
     { id: 'claude', name: '克劳德爵士', label: 'Claude', color: '#F08A5D', look: 'claude', stack: 9000, cards: ['Kh', 'Jc'] }
   ],
   events: [
@@ -372,6 +397,11 @@ function sil(k, c) {
   const p = (LOOKS[k] || (() => ({ back: '', dark: '', acc: '' })))(c);
   return `<svg viewBox="0 0 200 220" aria-hidden="true"><g fill="currentColor">${p.back}${BASE}${p.dark}</g>${p.acc}</svg>`;
 }
+// 有立绘的角色用立绘（portraits/<id>.png，已抠好背景），没有的用剪影
+const PORTRAITS = new Set(['claude', 'gpt', 'gemini', 'deepseek', 'qwen', 'grok', 'kimi', 'doubao']);
+function portrait(g, c) {
+  return PORTRAITS.has(g.id) ? `<img src="portraits/${g.id}.png" alt="">` : sil(g.k, c);
+}
 
 // ---------- casino chips: denominations stacked in columns ----------
 const DENOMS = [[1000, '#D4A11E'], [500, '#6A38A6'], [100, '#24252F'], [25, '#1C7C4C'], [5, '#B3233A']];
@@ -397,59 +427,13 @@ function chipsSVG(amount, maxCols = 3) {
   return s + '</svg>';
 }
 
-// ---------- the table, painted once ----------
+// ---------- the print on the cloth (the table itself is in backdrop.jpg) ----------
 function paintTable() {
   const cv = $('#tablecv'), S = 2;
   cv.width = 1600 * S; cv.height = 900 * S;
   const x = cv.getContext('2d');
   x.scale(S, S);
-  const CX = 800, CY = 430, R = 640, K = 0.375, FELT = R - 62;
-  const inPlane = (fn, dy = 0) => { x.save(); x.translate(CX, CY + dy); x.scale(1, K); fn(); x.restore(); };
-  const ring = (r, w, style, dash) => inPlane(() => { x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.lineWidth = w; x.strokeStyle = style; x.setLineDash(dash || []); x.stroke(); });
-  const disc = (r, style, dy = 0) => inPlane(() => { x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.fillStyle = style; x.fill(); }, dy);
-  // fill the cloth area with something drawn in screen space (gradients, textures)
-  const onCloth = paint => inPlane(() => { x.beginPath(); x.arc(0, 0, FELT, 0, Math.PI * 2); x.clip(); x.scale(1, 1 / K); x.translate(-CX, -CY); paint(); });
-
-  // apron: the table's thickness, lit from above so it falls off toward the sides
-  const ap = x.createLinearGradient(CX - R, 0, CX + R, 0);
-  ap.addColorStop(0, '#07050A'); ap.addColorStop(0.5, '#22151A'); ap.addColorStop(1, '#07050A');
-  disc(R, ap, 30);
-  // padded leather rail: concentric strokes give it a rounded, tubular profile
-  disc(R, '#120B0D');
-  for (let k = 0; k <= 22; k++) {
-    const t = k / 22;
-    ring(R - 24, 48 * (1 - t * 0.94), mix('#120A0C', '#5B2A33', Math.pow(t, 1.7)));
-  }
-  inPlane(() => {
-    x.beginPath(); x.arc(0, 0, R - 30, Math.PI * 1.08, Math.PI * 1.92);
-    x.lineWidth = 5; x.strokeStyle = 'rgba(255,232,214,0.16)'; x.shadowColor = 'rgba(255,232,214,0.4)'; x.shadowBlur = 10; x.stroke();
-  });
-  ring(R - 8, 1.1, 'rgba(201,162,74,0.35)', [5, 5]);
-  // wood cap and brass inlay between rail and cloth
-  const wood = x.createLinearGradient(0, CY - R * K, 0, CY + R * K);
-  wood.addColorStop(0, '#80592F'); wood.addColorStop(0.5, '#5A3B1F'); wood.addColorStop(1, '#2E1D0F');
-  ring(R - 54, 14, wood);
-  ring(FELT + 1, 1.6, '#C9A24A');
-  // the cloth, lit by a light just off-screen above
-  onCloth(() => {
-    const felt = x.createRadialGradient(CX, CY - 40, 20, CX, CY + 10, R * 0.95);
-    felt.addColorStop(0, '#22917F'); felt.addColorStop(0.42, '#136556'); felt.addColorStop(0.78, '#0A3D36'); felt.addColorStop(1, '#052320');
-    x.fillStyle = felt; x.fillRect(0, 0, 1600, 900);
-  });
-  // cloth grain
-  const n = document.createElement('canvas'); n.width = n.height = 128;
-  const nx = n.getContext('2d'), img = nx.createImageData(128, 128);
-  for (let k = 0; k < img.data.length; k += 4) { const v = Math.random() * 255; img.data[k] = img.data[k + 1] = img.data[k + 2] = v; img.data[k + 3] = 20; }
-  nx.putImageData(img, 0, 0);
-  onCloth(() => { x.fillStyle = x.createPattern(n, 'repeat'); x.fillRect(0, 0, 1600, 900); });
-  // the cloth darkens where it meets the rail
-  inPlane(() => {
-    const g = x.createRadialGradient(0, 0, FELT * 0.78, 0, 0, FELT);
-    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
-    x.beginPath(); x.arc(0, 0, FELT, 0, Math.PI * 2); x.fillStyle = g; x.fill();
-  });
-  // betting line and the print, both in worn gold
-  ring(R - 170, 1.4, 'rgba(214,180,100,0.32)');
+  const CX = 800, CY = 430;
   x.save(); x.translate(CX, CY + 128); x.scale(1, 0.62);
   x.textAlign = 'center'; x.fillStyle = 'rgba(214,180,100,0.2)';
   x.font = "500 30px Oswald, sans-serif";
@@ -461,79 +445,12 @@ function paintTable() {
   x.restore();
 }
 
-// ---------- night city behind glass ----------
-function paintCity() {
-  const x = $('#city').getContext('2d');
-  let seed = 11;
-  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const sky = x.createLinearGradient(0, 0, 0, 380);
-  sky.addColorStop(0, '#04060F'); sky.addColorStop(0.7, '#141030'); sky.addColorStop(1, '#2C1430');
-  x.fillStyle = sky; x.fillRect(0, 0, 1640, 380);
-  for (const L of [{ col: '#0D0D22', min: 120, max: 270, w0: 26, w1: 60, win: 0.1, wc: '150,175,255' }, { col: '#07071A', min: 70, max: 200, w0: 40, w1: 120, win: 0.22, wc: '255,205,130' }]) {
-    let bx = 0;
-    while (bx < 1640) {
-      const w = lerp(L.w0, L.w1, rnd()), h = lerp(L.min, L.max, rnd());
-      x.fillStyle = L.col; x.fillRect(bx, 380 - h, w, h);
-      for (let wy = 380 - h + 8; wy < 374; wy += 9)
-        for (let wx = bx + 5; wx < bx + w - 6; wx += 8)
-          if (rnd() < L.win) { x.fillStyle = `rgba(${L.wc},${0.25 + rnd() * 0.6})`; x.fillRect(wx, wy, 3, 4); }
-      bx += w + lerp(2, 10, rnd());
-    }
-  }
-}
-const rainCtx = $('#rain').getContext('2d');
-const RAIN = Array.from({ length: 90 }, () => ({ x: Math.random() * 1700, y: Math.random() * 344, l: 8 + Math.random() * 12, v: 5 + Math.random() * 5 }));
-function rain() {
-  rainCtx.clearRect(0, 0, 1600, 344);
-  rainCtx.strokeStyle = 'rgba(190,205,255,0.12)'; rainCtx.lineWidth = 1;
-  rainCtx.beginPath();
-  for (const d of RAIN) {
-    if (!paused) { d.y += d.v; d.x -= d.v * 0.2; if (d.y > 344) { d.y = -20; d.x = Math.random() * 1700; } }
-    rainCtx.moveTo(d.x, d.y); rainCtx.lineTo(d.x - d.l * 0.2, d.y + d.l);
-  }
-  rainCtx.stroke();
-  requestAnimationFrame(rain);
-}
 
 // ---------- director: turn a recorded hand into a shot list ----------
 const RANK_CN = { 'Royal Flush': '皇家同花顺', 'Straight Flush': '同花顺', 'Four of a Kind': '四条', 'Full House': '葫芦', 'Flush': '同花', 'Straight': '顺子', 'Three of a Kind': '三条', 'Two Pair': '两对', 'Pair': '一对', 'High Card': '高牌' };
-const STREET_CN = { preflop: '翻牌前', flop: '翻牌', turn: '转牌', river: '河牌' };
+const ACT_CN = { fold: '弃牌', check: '过牌', call: '跟注', bet: '下注', raise: '加注', allin: '全下' };
 const SUIT = { h: '♥', d: '♦', c: '♣', s: '♠', '♥': '♥', '♦': '♦', '♣': '♣', '♠': '♠' };
 
-// 规则：全下放大招特写；全下之后、河牌上的下注/跟注、大额加注，用带心声的完整对话框并推镜头；
-// 其余有台词的动作只在底部快速闪过台词
-function direct(log) {
-  const idx = Object.fromEntries(log.players.map((p, i) => [p.id, i]));
-  const bb = log.blinds[1];
-  const out = [], chaps = [];
-  const chap = name => { chaps.push(name); out.push({ t: 'chap', i: chaps.length - 1 }); };
-  const seat = s => (s ? { p: idx[s.p], amount: s.amount } : null);
-  chap('发牌');
-  out.push({ t: 'deal' });
-  const blinds = log.events.find(e => e.t === 'blinds');
-  out.push({ t: 'blinds', sb: seat(blinds && blinds.sb), bb: seat(blinds && blinds.bb) });
-  chap('翻牌前');
-  let pressure = false;
-  for (const e of log.events) {
-    if (e.t === 'act') {
-      if (e.allIn && !pressure) chap('全下');
-      const big = e.allIn || (e.a === 'raise' && e.to >= 8 * bb);
-      const full = !!e.in && (big || pressure || (e.street === 'river' && ['bet', 'raise', 'call'].includes(e.a)));
-      out.push({ t: 'act', p: idx[e.p], a: e.a, to: e.to || 0, allIn: !!e.allIn, sp: e.sp || '', in: e.in || '', full, cut: !!e.allIn && e.a !== 'call', street: e.street });
-      if (e.allIn) pressure = true;
-    } else if (e.t === 'board') {
-      out.push({ t: 'collect' });
-      chap(STREET_CN[e.street]);
-      out.push({ t: 'board', cards: e.cards, river: e.street === 'river', street: e.street });
-    } else if (e.t === 'result') {
-      out.push({ t: 'collect' });
-      chap('结算');
-      out.push({ t: 'show' });
-      out.push({ t: 'end' });
-    }
-  }
-  return { shots: out, chaps };
-}
 
 // ---------- replay engine ----------
 const CX = 800, CY = 430;
@@ -551,17 +468,18 @@ function sleep(ms) {
 async function W(ms) { const id = run; if (!FF) await sleep(ms); if (id !== run) throw STOP; }
 
 const camEl = $('#cam');
-function cam(x, y, z = 1, ms = 1400) {
-  z = Math.max(1, z);
-  const cx = Math.min(1600 - 800 / z, Math.max(800 / z, x));
-  const cy = Math.min(900 - 450 / z, Math.max(450 / z, y));
+// 画面夹在上下黑条之间：上条36px，下条200px，可见区域高664，中心在y=368
+const VIEW_TOP = 36, VIEW_H = 664, VCY = VIEW_TOP + VIEW_H / 2, HOME_Z = 0.9;
+function cam(x, y, z = HOME_Z, ms = 1400) {
+  const half = VIEW_H / 2 / z;
+  const cx = z > 1 ? Math.min(1600 - 800 / z, Math.max(800 / z, x)) : 800;
+  const cy = Math.min(900 - half, Math.max(-20 + half, y));
   camEl.style.setProperty('--camt', (FF || REDUCED ? 0 : ms) + 'ms');
-  camEl.style.transform = `translate(${800 - cx * z}px, ${450 - cy * z}px) scale(${z})`;
+  camEl.style.transform = `translate(${800 - cx * z}px, ${VCY - cy * z}px) scale(${z})`;
 }
-const camHome = (ms = 1400) => cam(800, 450, 1, ms);
-// 把说话的人放在画面上半部分，避开底部对话框和立绘
-function camOn(i, z = 1.3, ms = 1300) { const g = G[i]; cam(g.x - 100 / z, g.ay - 190 * g.sc + 210 / z, z, ms); }
-
+const camHome = (ms = 1400) => cam(800, 400, HOME_Z, ms);
+// 推到说话的人：脸放在画面上部
+function camOn(i, z = 1.25, ms = 1300) { const g = G[i]; cam(g.x, g.ay - 190 * g.sc + (VCY - 150) / z, z, ms); }
 const chapsEl = $('#chaps');
 function buildChaps() {
   chapsEl.innerHTML = '';
@@ -572,9 +490,40 @@ function street(name) { $('#st').textContent = name; }
 let tickTimer;
 function tick(t) {
   if (FF) return;
-  const box = $('#tick');
-  $('#tickp').textContent = t; box.classList.add('show');
-  clearTimeout(tickTimer); tickTimer = setTimeout(() => box.classList.remove('show'), 4200 / SPEED);
+  const em = $('#tickp');
+  em.textContent = t; em.classList.add('on');
+  clearTimeout(tickTimer); tickTimer = setTimeout(() => em.classList.remove('on'), 6000 / SPEED);
+}
+
+// ---------- bottom bar: chip stats before and after a hand, table talk during it ----------
+const bar = $('#bar');
+function barMode(mode) { bar.dataset.mode = mode; }
+function renderStats(title) {
+  $('#statttl').textContent = title;
+  $('#statsub').innerHTML = `盲注 <b>${fmt(LOG.blinds[0])} / ${fmt(LOG.blinds[1])}</b> · ${G.length} 人桌`;
+  $('#statgrid').innerHTML = G.map(g => {
+    const d = g.stack - LOG.players[g.i].stack;
+    const note = d === 0 ? `<small>${esc(g.label || '')}</small>` : `<small class="${d > 0 ? 'up' : 'down'}">${d > 0 ? '+' : ''}${fmt(d)}</small>`;
+    return `<div class="cell" style="--c:${g.c}"><b>${esc(g.name)}</b><span>${fmt(g.stack)}</span>${note}</div>`;
+  }).join('');
+  barMode('stats');
+}
+function barWho(g, note) {
+  bar.style.setProperty('--c', g.c);
+  bar.classList.toggle('side-r', g.x > CX);
+  $('#dport').innerHTML = PORTRAITS.has(g.id) ? `<div class="fig">${portrait(g)}</div>` : sil(g.k, '#F7F4EC');
+  $('#dname').innerHTML = `<span>${esc(g.name)}</span><small>${esc(String(g.label || '').toUpperCase())}</small>${note ? `<em>${note}</em>` : ''}`;
+  bar.classList.remove('past');
+  barMode('talk');
+}
+// 没有台词也没有心声要放时，底条只简单交代一下动作
+function barAction(i, text) {
+  if (FF) return;
+  barWho(G[i]);
+  bar.classList.remove('full', 'thought', 'typing');
+  bar.classList.add('act');
+  $('#dinner').classList.remove('show');
+  $('#dsay').textContent = text;
 }
 function countTo(node, from, to, ms) {
   if (FF) { node.textContent = fmt(to); return; }
@@ -588,11 +537,12 @@ function reset() {
   dyn.innerHTML = ''; seatsEl.innerHTML = '';
   pot = 0; boardEls = []; boardN = 0;
   $('#potn').textContent = '0'; $('#potchips').innerHTML = '';
-  ['#win', '#dlg', '#end', '#tick'].forEach(s => $(s).classList.remove('show'));
+  ['#win', '#end'].forEach(s => $(s).classList.remove('show'));
+  $('#tickp').classList.remove('on');
   $('#cut').classList.remove('go', 'out');
   world.classList.remove('shake');
   street('发牌'); chap(-1);
-  $('#hudh').textContent = `第 ${LOG.hand} 手`;
+  $('#tbhand').textContent = `第 ${LOG.hand} 手`;
   $('#blinds').textContent = `盲注 ${fmt(LOG.blinds[0])} / ${fmt(LOG.blinds[1])}`;
   const n = LOG.players.length;
   G = LOG.players.map((d, i) => {
@@ -603,12 +553,14 @@ function reset() {
     const g = { ...d, c, k: d.look, i, x, y, near, far, sc: 0.84 + (y - 175) / 510 * 0.3, ay: y + (near ? 78 : 22), bet: 0, betEl: null, cardEls: [] };
     const ht = near ? 0.4 : 0.31, bt = near ? 0.6 : 0.52;
     g.hx = lerp(x, CX, ht); g.hy = lerp(y, CY, ht); g.bx = lerp(x, CX, bt); g.by = lerp(y, CY, bt);
-    const e = el('div', 'seat', `<div class="bust">${sil(d.look, c)}</div><div class="plate"><b>${esc(d.name)}</b><span class="stk">${fmt(d.stack)}</span></div><div class="tag"></div>`);
+    const bust = PORTRAITS.has(d.id) ? `<div class="glow">${portrait(d)}</div>` : sil(d.look, c);
+    const e = el('div', 'seat' + (!near && !far && y < CY ? ' ptop' : ''), `<div class="bust">${bust}</div><div class="plate"><b>${esc(d.name)}</b><span class="stk">${fmt(d.stack)}</span></div><div class="tag"></div>`);
     e.style.left = x + 'px'; e.style.top = g.ay + 'px'; e.style.zIndex = Math.round(y);
     e.style.setProperty('--c', c); e.style.setProperty('--sc', g.sc);
     seatsEl.append(e); g.el = e;
     return g;
   });
+  renderStats('开局筹码');
 }
 
 function on(i, b) { G[i].el.classList.toggle('on', b); }
@@ -637,10 +589,12 @@ async function deal() {
       place(c, CX - 22, CY - 31); dyn.append(c); c.getBoundingClientRect();
       place(c, g.hx - 22 + (round ? 13 : -13), g.hy - 31, round ? 6 : -6);
       g.cardEls.push(c);
+      sfx('deal', 0.8);
       await W(60);
     }
   }
   await W(400);
+  sfx('flip', 0.7);
   for (const i of order) { G[i].cardEls.forEach(c => c.classList.add('up')); await W(50); }
   const k = G[btn], d = el('div', 'dbtn', 'D');
   d.style.left = k.hx + 'px'; d.style.top = (k.hy - 56) + 'px';
@@ -656,8 +610,10 @@ async function board(ev) {
     place(c, CX - 34, CY - 48); dyn.append(c); c.getBoundingClientRect();
     place(c, 602 + k * 82, 372);
     boardEls[k] = c;
+    sfx('deal');
     await W(300);
     c.classList.add('up');
+    sfx('flip', ev.river ? 1.3 : 1);
     await W(ev.river ? 700 : 220);
   }
   if (ev.river) { await W(500); camHome(1600); }
@@ -686,16 +642,25 @@ async function collect() {
     g.betEl = null; g.bet = 0;
   });
   if (!add) return;
+  sfx('collect');
   await W(560);
   setPot(pot + add);
   await W(350);
 }
 
 function apply(i, ev) {
-  if (ev.a === 'fold') { G[i].el.classList.add('fold'); G[i].cardEls.forEach(c => c.classList.add('dim')); tag(i, 'quiet', '弃牌'); }
-  else if (ev.a === 'check') tag(i, 'quiet', '过牌', 1100);
+  if (ev.a === 'fold') {
+    // 弃掉的牌扣过去、滑进牌堆收走，桌面只留还在打的人的牌
+    G[i].el.classList.add('fold');
+    G[i].cardEls.forEach(c => { c.classList.remove('up'); c.style.opacity = '0'; place(c, CX - 22, CY - 31, 90); setTimeout(() => c.remove(), FF ? 0 : 600); });
+    G[i].cardEls = [];
+    tag(i, 'quiet', '弃牌');
+    sfx('fold');
+  }
+  else if (ev.a === 'check') { tag(i, 'quiet', '过牌', 1100); sfx('check'); }
   else {
     setBet(i, ev.to);
+    sfx(ev.allIn ? 'allin_chips' : 'chips');
     if (ev.allIn) tag(i, 'allin', 'ALL IN');
     else tag(i, 'quiet', { call: '跟注', bet: '下注', raise: '加注' }[ev.a] || ev.a, 1100);
   }
@@ -703,43 +668,113 @@ function apply(i, ev) {
 
 async function type(node, txt, ms) { if (FF) { node.textContent = txt; return; } for (const ch of txt) { node.textContent += ch; await W(ms); } }
 
-// 底部对话框：full带心声并推镜头；否则只快速闪过一句台词
-async function say(i, speech, inner, full) {
+// ---------- sound: 背景音乐和音效（Web Audio）。浏览器要先在页面上点一下才会出声 ----------
+const SFX_GAIN = { deal: 1.4, flip: 1.0, chips: 0.8, allin_chips: 0.9, collect: 1.1, check: 0.9, fold: 2.6, impact: 0.5, win: 0.7 };
+const MUSIC_VOL = 0.2, MUSIC_DUCKED = 0.08;
+const AC = new (window.AudioContext || window.webkitAudioContext)();
+const master = AC.createGain(), music = AC.createGain(), fx = AC.createGain();
+music.gain.value = MUSIC_VOL;
+music.connect(master); fx.connect(master); master.connect(AC.destination);
+const BUF = {};
+let bgm = null, muted = false;
+async function loadSound(name) {
+  try { BUF[name] = await AC.decodeAudioData(await (await fetch(`sfx/${name}.mp3`)).arrayBuffer()); } catch (e) { /* 少一个音效不影响回放 */ }
+}
+Promise.all([...Object.keys(SFX_GAIN), 'bgm'].map(loadSound)).then(startMusic);
+// 音效每次音高和音量稍微抖一下，连着发牌不会像复读
+function sfx(name, gain = 1) {
+  if (FF || !BUF[name] || AC.state !== 'running') return;
+  const src = AC.createBufferSource(), g = AC.createGain();
+  src.buffer = BUF[name];
+  src.playbackRate.value = SPEED * (0.95 + Math.random() * 0.1);
+  g.gain.value = SFX_GAIN[name] * gain * (0.9 + Math.random() * 0.2);
+  src.connect(g); g.connect(fx); src.start();
+}
+// 背景音乐循环播放，跳过开头的起音和结尾的收尾
+function startMusic() {
+  if (bgm || !BUF.bgm || AC.state !== 'running') return;
+  bgm = AC.createBufferSource();
+  bgm.buffer = BUF.bgm; bgm.loop = true; bgm.loopStart = 1; bgm.loopEnd = BUF.bgm.duration - 3;
+  bgm.connect(music); bgm.start();
+}
+// 有人说话时把音乐压低
+function duck(on) { music.gain.setTargetAtTime(on ? MUSIC_DUCKED : MUSIC_VOL, AC.currentTime, 0.2); }
+document.addEventListener('pointerdown', () => { if (!paused && AC.state !== 'running') AC.resume().then(startMusic); });
+
+// ---------- voice: 配好的台词和心声（/voice/<手牌id>/manifest.json，按事件序号对上） ----------
+let VOICE = {};
+const vo = new Audio();
+async function loadVoice(log) {
+  VOICE = {};
+  try {
+    const res = await fetch(`/voice/${encodeURIComponent(log.id)}/manifest.json`);
+    if (res.ok) VOICE = await res.json();
+  } catch (e) { /* 没有配音就只放字幕 */ }
+}
+function voiceSrc(k, kind) {
+  const v = VOICE[k] && VOICE[k][kind];
+  return v ? `/voice/${encodeURIComponent(LOG.id)}/${v.file}` : null;
+}
+function hush() { vo.pause(); vo.removeAttribute('src'); }
+// 有配音时边放边打字，打字速度跟着音频长度走，放完再往下；没有配音（或浏览器还不让出声）就照常打字
+async function speak(node, txt, ms, src) {
+  if (!src || FF) return type(node, txt, ms);
+  vo.src = src;
+  vo.playbackRate = SPEED;
+  const dur = await new Promise(res => { vo.onloadedmetadata = () => res(vo.duration * 1000); vo.onerror = () => res(0); });
+  if (!dur) return type(node, txt, ms);
+  try { await vo.play(); } catch (e) { return type(node, txt, ms); }
+  duck(true);
+  try {
+    await type(node, txt, Math.min(ms, dur * 0.8 / Math.max(1, txt.length)));
+    while (!vo.ended && !vo.error) await W(50);
+  } finally {
+    duck(false);
+  }
+}
+
+// 底条：full是台词+心声并推镜头；quick只放一句台词；thought放一句心声
+async function say(i, speech, inner, full, thought = false, k = -1) {
   if (FF) return;
-  const g = G[i], dlg = $('#dlg');
+  const g = G[i];
   on(i, true);
   if (full) camOn(i);
-  dlg.classList.toggle('quick', !full);
-  dlg.style.setProperty('--c', g.c);
-  $('#dport').innerHTML = sil(g.k, '#F7F4EC');
-  $('#dname').innerHTML = `<span>${esc(g.name)}</span><small>${esc(String(g.label || '').toUpperCase())}</small>`;
+  barWho(g, thought ? '心声 · 只有观众听得到' : '台词 · 全桌都听得到');
+  bar.classList.remove('act');
+  bar.classList.toggle('full', full);
+  bar.classList.toggle('thought', thought);
   $('#dsay').textContent = ''; $('#dinnerp').textContent = '';
   $('#dinner').classList.remove('show');
-  dlg.classList.add('show');
-  await W(full ? 450 : 300);
-  await type($('#dsay'), speech || '……', full ? 34 : 26);
+  bar.classList.add('typing');
+  await W(full ? 350 : 150);
+  const first = thought ? voiceSrc(k, 'in') : speech ? voiceSrc(k, 'sp') : null;
+  await speak($('#dsay'), thought ? inner : (speech || '……'), full ? 34 : thought ? 18 : 26, first);
+  bar.classList.remove('typing');
   if (full && inner) {
-    await W(450);
+    await W(400);
     $('#dinner').classList.add('show');
     await W(250);
-    await type($('#dinnerp'), inner, 26);
-    await W(1800);
+    const second = voiceSrc(k, 'in');
+    await speak($('#dinnerp'), inner, 26, second);
+    await W(second ? 700 : 1800);
   } else {
-    await W(900);
+    await W(first ? 500 : thought ? 1300 : 1000);
   }
-  dlg.classList.remove('show'); on(i, false);
+  bar.classList.add('past');
+  on(i, false);
   if (full) camHome(1400);
-  await W(full ? 500 : 320);
+  await W(full ? 450 : 200);
 }
 
 async function allinCut(i, amt) {
   if (FF) return;
   const g = G[i], cut = $('#cut');
-  $('#cutwho').innerHTML = sil(g.k, g.c);
+  $('#cutwho').innerHTML = portrait(g, g.c);
   $('#cutamt').textContent = fmt(amt);
   cam(g.x, g.y - 60, 1.5, 300);
   await W(380);
   cut.classList.remove('go', 'out'); void cut.offsetWidth; cut.classList.add('go');
+  sfx('impact');
   await W(260);
   if (!REDUCED) { world.classList.remove('shake'); void world.offsetWidth; world.classList.add('shake'); }
   await W(1900);
@@ -754,20 +789,30 @@ async function act(ev) {
   on(i, true); tag(i, 'think', '思考中');
   await W(ev.full ? 800 : 500);
   untag(i);
+  // 模型没给出有效决策时由系统按规则代打，直接标出来，不演台词
+  if (ev.auto) {
+    apply(i, ev);
+    barAction(i, `系统代打 · ${ACT_CN[ev.a] || ev.a}`);
+    tag(i, 'quiet', '系统代打', 1600);
+    await W(900);
+    on(i, false);
+    return;
+  }
   if (ev.cut) {
     apply(i, ev);
     tick(`${G[i].name} 全下 ${fmt(ev.to)}！`);
     await allinCut(i, ev.to);
-    if (ev.sp || ev.in) await say(i, ev.sp, ev.in, true);
+    if (ev.sp || ev.in) await say(i, ev.sp, ev.in, true, false, ev.ev);
   } else if (ev.full) {
     on(i, false);
-    await say(i, ev.sp, ev.in, true);
+    await say(i, ev.sp, ev.in, true, false, ev.ev);
     apply(i, ev);
     await W(500);
   } else {
     apply(i, ev);
-    if (ev.sp) await say(i, ev.sp, '', false);
-    else await W(450);
+    if (ev.show === 'say') await say(i, ev.sp, '', false, false, ev.ev);
+    else if (ev.show === 'think') await say(i, '', ev.in, false, true, ev.ev);
+    else { barAction(i, ACT_CN[ev.a] || ev.a); await W(450); }
   }
   on(i, false);
 }
@@ -801,7 +846,7 @@ async function show() {
   const names = winIds.map(id => byId[id] ? byId[id].name : id);
   $('#winn').textContent = names.length > 1 ? `${names.join('、')} 平分` : `${names[0] || ''} 赢下`;
   $('#wina').textContent = '+' + fmt(total);
-  if (!FF) $('#win').classList.add('show');
+  if (!FF) { $('#win').classList.add('show'); sfx('win'); sfx('collect', 1.2); }
   tick(`${names.join('、')} 赢下 ${fmt(total)}。`);
   $('#potchips').innerHTML = '';
   for (const w of r.winners || []) {
@@ -825,6 +870,7 @@ async function show() {
   }
   await W(1700);
   $('#win').classList.remove('show');
+  renderStats('本手结束 · 筹码变化');
   winIds.forEach(id => byId[id] && on(byId[id].i, false));
 }
 
@@ -852,7 +898,7 @@ async function step(ev) {
 }
 
 async function intro() {
-  $('#introsub').textContent = `第 ${LOG.hand} 手`;
+  $('#introsub').textContent = `第 ${LOG.hand} 手${LOG.title ? ' · ' + LOG.title : ''}`;
   $('#intro').classList.add('show');
   cam(800, 390, 1.45, 0);
   await W(FIRST ? 1600 : 1000);
@@ -865,6 +911,7 @@ async function intro() {
 
 async function start(target = 0) {
   run++;
+  hush();
   FF = target > 0;
   stage.classList.toggle('ff', FF);
   reset();
@@ -886,11 +933,12 @@ async function start(target = 0) {
 }
 
 // ---------- hand list ----------
-function play(log) {
+async function play(log) {
   LOG = log;
+  await loadVoice(log);
   ({ shots: SHOTS, chaps: CHAPS } = direct(log));
   buildChaps();
-  $('#title').textContent = `回放 · 第 ${log.hand} 手`;
+  $('#title').textContent = `回放 · 第 ${log.hand} 手${log.title ? '「' + log.title + '」' : ''}`;
   const names = log.players.map(p => p.name).join('、');
   $('#subtitle').textContent = `${log.players.length} 人桌 · ${names}`;
   $('#endsub').textContent = CUR < LIST.length - 1 ? '打开“连播”可以自动接着看下一手' : '这是最后一手';
@@ -917,7 +965,8 @@ async function loadList() {
     if (!res.ok) throw new Error(res.status);
     const hands = await res.json();
     if (!Array.isArray(hands) || !hands.length) throw new Error('empty');
-    hands.sort((a, b) => String(a.startedAt).localeCompare(String(b.startedAt)));
+    // 同一场按手数排；并行跑出来的手完成顺序不固定，不能按开始时间排
+    hands.sort((a, b) => String(a.session).localeCompare(String(b.session)) || a.hand - b.hand);
     LIST = hands;
     $('#src').textContent = `共 ${hands.length} 手已记录`;
   } catch (error) {
@@ -928,7 +977,7 @@ async function loadList() {
   sel.innerHTML = '';
   LIST.forEach((h, k) => {
     const w = (h.winners || []).map(x => `${x.name} +${fmt(x.amount)}`).join('、');
-    sel.append(new Option(`第 ${h.hand} 手${w ? ' · ' + w : ''}`, String(k)));
+    sel.append(new Option(`第 ${h.hand} 手${h.title ? '「' + h.title + '」' : ''}${w ? ' · ' + w : ''}`, String(k)));
   });
   // 默认从最近一场的第一手开始看
   const lastSession = LIST[LIST.length - 1].session;
@@ -944,11 +993,19 @@ pauseBtn.addEventListener('click', () => {
   paused = !paused;
   stage.classList.toggle('paused', paused);
   pauseBtn.textContent = paused ? '继续' : '暂停';
+  if (paused) { vo.pause(); AC.suspend(); }
+  else { AC.resume(); if (vo.src && !vo.ended) vo.play().catch(() => {}); }
 });
 function restart(k = 0) { paused = false; stage.classList.remove('paused'); pauseBtn.textContent = '暂停'; start(k); }
 $('#replay').addEventListener('click', () => restart(0));
 $('#again').addEventListener('click', () => restart(0));
-$('#speed').addEventListener('click', e => { SPEED = SPEED === 1 ? 2 : 1; e.currentTarget.textContent = SPEED + '× 速度'; });
+$('#mute').addEventListener('click', e => {
+  muted = !muted;
+  master.gain.value = muted ? 0 : 1;
+  vo.muted = muted;
+  e.currentTarget.textContent = muted ? '声音 关' : '声音 开';
+});
+$('#speed').addEventListener('click', e => { SPEED = SPEED === 1 ? 2 : 1; vo.playbackRate = SPEED; e.currentTarget.textContent = SPEED + '× 速度'; });
 $('#prev').addEventListener('click', () => { if (CUR > 0) selectHand(CUR - 1); });
 $('#next').addEventListener('click', () => { if (CUR < LIST.length - 1) selectHand(CUR + 1); });
 $('#handsel').addEventListener('change', e => selectHand(Number(e.target.value)));
@@ -963,9 +1020,7 @@ function fit() {
 window.addEventListener('resize', fit);
 fit();
 
-paintCity();
 paintTable();
 document.fonts.ready.then(paintTable);
-if (!REDUCED) rain();
 loadList();
 </script>

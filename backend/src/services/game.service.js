@@ -54,8 +54,8 @@ class GameService {
     return gameState;
   }
 
-  // 开始游戏
-  startGame(gameId) {
+  // 开始游戏。options.deck 可传入事先排好的牌堆（从末尾往前发），用于剧本发牌
+  startGame(gameId, options = {}) {
     const game = this.games.get(gameId);
     if (!game) throw new Error('Game not found');
     // 允许从waiting或finished状态开始游戏
@@ -64,8 +64,12 @@ class GameService {
     if (game.players.length < 2) throw new Error('Not enough players');
 
     // 重置游戏状态
-    game.deck = this.createDeck();
-    this.shuffleDeck(game.deck);
+    if (options.deck) {
+      game.deck = [...options.deck];
+    } else {
+      game.deck = this.createDeck();
+      this.shuffleDeck(game.deck);
+    }
     game.communityCards = [];
     game.pot = 0;
     game.currentBet = 0;

@@ -222,6 +222,16 @@ def format_table_talk(game_state: Dict) -> str:
         lines.append(f'- {item.get("name", "?")} ({stage}): "{item.get("speech", "")}"')
     return "\n".join(lines)
 
+def format_roster(game_state: Dict) -> str:
+    """格式化同桌其他人的公众形象，供偶尔互相调侃"""
+    roster = [r for r in (game_state.get("roster") or []) if r.get("image")]
+    if not roster:
+        return ""
+    lines = ["who else is at the table (their public image, which everyone knows):"]
+    for r in roster:
+        lines.append(f'- {r.get("name", "?")}: {r["image"]}')
+    return "\n".join(lines)
+
 def build_prompt(
     game_state: Dict,
     player_id: str,
@@ -246,6 +256,7 @@ def build_prompt(
     # 构建行动历史描述
     action_history_description = format_action_history(game_state)
     table_talk_description = format_table_talk(game_state)
+    roster_description = format_roster(game_state)
 
     player_count = len(game_state["players"])
 
@@ -255,6 +266,7 @@ def build_prompt(
 your character at this table:
 {persona}
 Your character only shapes how you talk. It must not change how you play: make the best poker decision you can.
+The character's catchphrases and running jokes are seasoning: use one now and then, not in every line.
 """ if persona else ""
 
     prompt = f"""
@@ -269,6 +281,8 @@ game state:
 
 {table_talk_description}
 
+{roster_description}
+
 you can take actions:
 {', '.join(valid_actions)}
 
@@ -280,8 +294,8 @@ Please note that these are TOTAL bet amounts, not additional amounts. Your curre
 
 Please output your decision in JSON format, as follows:
 {{
-  "thinking": "your private inner monologue, in Chinese, first person, under 150 characters",
-  "speech": "what you say out loud at the table, in Chinese, under 40 characters, or an empty string",
+  "inner": "for the audience: in Chinese, first person, one to three sentences under 120 characters, how you read this hand (your cards, the board, what opponents likely hold) and why you chose this action",
+  "speech": "what you say out loud at the table this turn, in Chinese, under 40 characters",
   "action": "fold|check|call|raise|allin",
   "amount": number (only when action is raise)
 }}
@@ -291,7 +305,14 @@ Note:
 2. If 'check' is available in your valid actions, you should prefer it over 'fold'
 3. If you choose raise, the amount must be in the range of min and max bet
 4. Must output valid JSON format
-5. "thinking" is private: no other player ever sees it. "speech" is heard by everyone at the table, so it can be trash talk, table banter or a bluff, and it never has to match your real hand
+5. "inner" is shown only to the audience, never to other players, so it can be honest about your hand. It is a short summary for viewers, not your full reasoning.
+6. "speech" is heard by everyone at the table, and table talk is part of the game: say something on every turn, including folds and checks. Use it to get inside your opponents' heads and to show who your character is:
+   - needle a specific opponent by name, or answer what someone just said or did
+   - talk up a weak hand, act worried with a strong one, or accuse someone of bluffing; it never has to match your real cards
+   - comment on how someone has been playing, the board, the pot, or a big bet
+   Your opponents hear every word, so never name your actual hole cards or say exactly what you hold (not "72o, 弃了", not "我AK"), even when folding; real players keep their cards secret. Vague hints, misdirection and bluffs are fine.
+   Most lines are plain poker talk about this hand and these opponents; your character shows in your tone, not in a catchphrase every line. Now and then, roughly one line in five or six, you may tease someone with their real-world public image, for example a remark about someone's money when they make a huge bet. Keep the poker and the real-world joke separate: never rephrase poker actions in business or tech jargon. This is a show for an audience, so keep lines short, varied and fun, and do not repeat what you or anyone else already said this hand.
+7. In both "inner" and "speech", say poker terms the way Chinese players do, in English: 3-bet, 4-bet, c-bet, check-raise, all-in, range, EV, outs, nuts, value, bluff, SPR. Do not translate them (write "4-bet", not "四加").
 """
 
     # 完整提示词包含手牌信息，只在DEBUG级别输出
@@ -489,7 +510,8 @@ def parse_response(response_text: str, valid_actions=None, min_bet=None, max_bet
             amount = int(amount)
         elif not isinstance(amount, (int, type(None))):
             amount = None
-        thinking = response_data.get("thinking")
+        # 内心独白字段叫inner；兼容旧的thinking
+        thinking = response_data.get("inner") or response_data.get("thinking")
 
         # 如果提取到JSON但没有thinking字段，保留清理后的原始响应
         if thinking is None:

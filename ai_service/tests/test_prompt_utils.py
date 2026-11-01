@@ -236,3 +236,23 @@ def test_build_prompt_includes_persona_and_table_talk():
     assert "must not change how you play" in prompt
     assert '- C (Pre-Flop): "来点刺激的！"' in prompt
     assert '"speech"' in prompt
+
+def test_parse_inner_field():
+    """内心独白字段叫inner，旧的thinking也要兼容"""
+    action, amount, thinking = parse_response('{"inner": "葫芦在手", "speech": "就这？", "action": "check"}', VALID_ACTIONS, 40, 1000)
+    assert action == "check"
+    assert thinking == "葫芦在手"
+
+def test_build_prompt_lists_table_roster_for_teasing():
+    players = [_player("A", 1), _player("B", 2, ["Ah", "Kd"]), _player("C", 3)]
+    state = _state(players, 0)
+    state["roster"] = [{"name": "开总", "image": "硅谷 CEO，公司刚融了一大笔钱"}]
+    prompt = build_prompt(state, "B", VALID_ACTIONS, 20, 1000)
+    assert "- 开总: 硅谷 CEO，公司刚融了一大笔钱" in prompt
+    assert "never rephrase poker actions" in prompt
+
+def test_build_prompt_keeps_hole_cards_out_of_speech():
+    """台词所有人都听得到，提示词要求不报出自己的底牌"""
+    players = [_player("A", 1), _player("B", 2, ["Ah", "Kd"]), _player("C", 3)]
+    prompt = build_prompt(_state(players, 0), "B", VALID_ACTIONS, 20, 1000)
+    assert "never name your actual hole cards" in prompt

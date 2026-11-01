@@ -1,5 +1,6 @@
 // 让一桌AI自己连打N手并记录回放。需要先启动AI服务。
 // 用法: node src/scripts/run-hands.js --hands 20 [--seats claude,gpt,grok] [--stack 10000] [--blinds 50/100]
+// 做节目用剧本发牌（run-show.js）；这个脚本是随机发牌、一桌连打
 const aiService = require('../services/ai.service');
 const { TableRunner } = require('../services/table-runner');
 const { getCharacters } = require('../config/characters');

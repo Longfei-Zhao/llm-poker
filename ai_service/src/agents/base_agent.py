@@ -146,6 +146,10 @@ class BaseAgent(ABC):
         Returns:
             str: 当前玩家ID
         """
+        # 后端会注明行动玩家在牌桌上的ID；多桌并行时代理ID带桌号前缀，和牌桌上的ID不同
+        if game_state.get('actingPlayerId'):
+            return game_state['actingPlayerId']
+
         # 如果已知玩家ID，直接返回
         if self.player_id:
             return self.player_id

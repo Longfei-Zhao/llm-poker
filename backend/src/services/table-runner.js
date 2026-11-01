@@ -2,10 +2,11 @@
 const { GameService } = require('./game.service');
 const { HandRecorder } = require('./hand-recorder');
 const { buildPlayerView, sanitizeDecision, defaultAction } = require('./player-view');
+const { buildDeck } = require('./scenario');
 const logger = require('../utils/logger');
 
 class TableRunner {
-  constructor({ ai, characters, handsDir, stack = 10000, smallBlind = 50, bigBlind = 100, gameService = new GameService(), session = null }) {
+  constructor({ ai, characters, handsDir, stack = 10000, smallBlind = 50, bigBlind = 100, gameService = new GameService(), session = null, agentPrefix = '' }) {
     this.ai = ai;
     this.characters = characters;
     this.stack = stack;
@@ -16,6 +17,8 @@ class TableRunner {
     this.session = session || new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
     this.seats = {};
     this.game = null;
+    // 同时开多桌时，AI服务里的代理按桌区分（同一个角色每桌一个代理）
+    this.agentPrefix = agentPrefix;
   }
 
   // 为每个角色创建AI代理；没配好密钥的角色跳过，至少要两人才能开桌
@@ -23,7 +26,7 @@ class TableRunner {
     const seated = [];
     for (const c of this.characters) {
       try {
-        await this.ai.createAgent(c.id, c.name, c.provider, c.model);
+        await this.ai.createAgent(this.agentPrefix + c.id, c.name, c.provider, c.model, 0.7, c.effort);
         this.seats[c.id] = c;
         seated.push(c);
       } catch (error) {
@@ -31,20 +34,37 @@ class TableRunner {
       }
     }
     if (seated.length < 2) throw new Error('可入座的角色不足两人，请检查AI服务和API密钥');
-
-    this.game = this.gameService.createGame(
-      seated.map(c => ({ id: c.id, name: c.name, aiModel: c.label, chips: this.stack }))
-    );
-    this.game.smallBlind = this.smallBlind;
-    this.game.bigBlind = this.bigBlind;
+    this.seated = seated;
+    this.newGame();
     return seated;
   }
 
+  // 开一张新桌：stacks按角色id指定筹码（缺省用统一筹码），dealerIndex指定庄家
+  newGame({ stacks = {}, dealerIndex } = {}) {
+    this.game = this.gameService.createGame(
+      this.seated.map(c => ({ id: c.id, name: c.name, aiModel: c.label, chips: stacks[c.id] || this.stack })),
+      Number.isInteger(dealerIndex) ? { dealerIndex } : {}
+    );
+    this.game.smallBlind = this.smallBlind;
+    this.game.bigBlind = this.bigBlind;
+    return this.game;
+  }
+
+  // 打一手剧本牌：按剧本指定庄家、底牌和公共牌，牌怎么打仍完全由模型决定
+  async playScenario(scenario, handNo) {
+    const ids = this.seated.map(c => c.id);
+    const dealerIndex = scenario.button ? ids.indexOf(scenario.button) : undefined;
+    if (scenario.button && dealerIndex === -1) throw new Error(`剧本里的庄家${scenario.button}没有入座`);
+    const game = this.newGame({ stacks: scenario.stacks, dealerIndex });
+    const deck = buildDeck(game.players.map(p => p.id), scenario.holes || {}, scenario.board || []);
+    return this.playHand(handNo, { deck, title: scenario.title });
+  }
+
   // 打完整一手牌并落盘，返回 { file, log }
-  async playHand(handNo) {
+  async playHand(handNo, { deck, title } = {}) {
     const game = this.game;
-    this.gameService.startGame(game.id);
-    this.recorder.begin(game, this.seats, { id: `${this.session}-${String(handNo).padStart(3, '0')}`, session: this.session, hand: handNo });
+    this.gameService.startGame(game.id, deck ? { deck } : {});
+    this.recorder.begin(game, this.seats, { id: `${this.session}-${String(handNo).padStart(3, '0')}`, session: this.session, hand: handNo, title });
     const tableTalk = [];
     while (game.state !== 'finished') {
       await this.turn(tableTalk);
@@ -57,17 +77,22 @@ class TableRunner {
     const player = game.players[game.currentPlayerIndex];
     const seat = this.seats[player.id] || {};
     const legal = this.gameService.getLegalActions(game, player);
-    const view = buildPlayerView(game, player, { persona: seat.persona, tableTalk });
+    const roster = game.players.map(p => ({ id: p.id, name: p.name, image: (this.seats[p.id] || {}).image }));
+    const view = buildPlayerView(game, player, { persona: seat.persona, tableTalk, roster });
 
     let decision;
+    let failed = false;
     try {
-      decision = await this.ai.getDecision(player.id, view, legal.validActions, legal.minBet, legal.maxBet);
+      decision = await this.ai.getDecision(this.agentPrefix + player.id, view, legal.validActions, legal.minBet, legal.maxBet);
     } catch (error) {
       logger.warn(`${player.name}决策失败，使用默认动作: ${error.message}`);
       decision = { action: defaultAction(legal.validActions), amount: 0 };
+      failed = true;
     }
 
     let { action, amount, corrected } = sanitizeDecision(decision, legal);
+    // AI调用失败时是系统替它出的手，回放里要能看出来
+    corrected = corrected || failed;
     const street = game.state;
     const boardBefore = game.communityCards.length;
     try {

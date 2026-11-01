@@ -20,6 +20,7 @@ class HandRecorder {
       id: meta.id || `hand-${Date.now()}`,
       session: meta.session || null,
       hand: meta.hand || game.round + 1,
+      title: meta.title || null,
       startedAt: new Date().toISOString(),
       blinds: [game.smallBlind, game.bigBlind],
       button: game.players[game.dealerIndex].id,

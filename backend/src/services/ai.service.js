@@ -18,10 +18,11 @@ class AIService {
      * @param {string} name - 玩家名称
      * @param {string} provider - LLM提供商
      * @param {string} [model] - 模型名称（可选）
-     * @param {number} [temperature=0.7] - 采样温度（可选）
+     * @param {number} [temperature=0.7] - 采样温度（可选，部分新模型会忽略）
+     * @param {string} [effort] - 推理强度（可选）
      * @returns {Promise<Object>} 创建结果
      */
-    async createAgent(playerId, name, provider, model = null, temperature = 0.7) {
+    async createAgent(playerId, name, provider, model = null, temperature = 0.7, effort = null) {
         try {
             console.log(`尝试创建AI代理: ${name}, provider: ${provider}, model: ${model}`);
             
@@ -30,7 +31,8 @@ class AIService {
                 name,
                 provider,
                 model,
-                temperature
+                temperature,
+                effort
             });
             
             console.log(`AI代理创建成功: ${playerId}`);

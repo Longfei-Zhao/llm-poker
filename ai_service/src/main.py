@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from .agents.llm_factory import LLMFactory
 from .agents.base_agent import BaseAgent
-from .config.agent_config import get_api_key, get_provider_config
+from .config.agent_config import get_api_key, get_provider_config, openai_compatible_providers
 from .exceptions import AIServiceError, ConfigError, PlayerError
 
 # 加载环境变量
@@ -83,6 +83,7 @@ class CreateAgentRequest(BaseModel):
     provider: str
     model: Optional[str] = None
     temperature: Optional[float] = 0.7
+    effort: Optional[str] = None  # 推理强度：low/medium/high/xhigh/max，仅Anthropic和OpenAI兼容代理使用
 
 class CreateAgentResponse(BaseModel):
     """创建代理响应模型"""
@@ -136,6 +137,11 @@ async def create_agent(request: CreateAgentRequest) -> CreateAgentResponse:
     if not api_key and get_provider_config(actual_provider).api_key_env is not None:
         raise ConfigError(f"未配置{actual_provider}的API密钥")
 
+    # 只有Anthropic和OpenAI兼容代理认识effort参数
+    effort_kwargs = {}
+    if request.effort and (actual_provider == "anthropic" or actual_provider in openai_compatible_providers()):
+        effort_kwargs["effort"] = request.effort
+
     # 创建代理实例
     agent = LLMFactory.create_agent(
         provider=actual_provider,
@@ -143,7 +149,8 @@ async def create_agent(request: CreateAgentRequest) -> CreateAgentResponse:
         name=request.name,
         api_key=api_key,
         model=request.model,
-        temperature=request.temperature
+        temperature=request.temperature,
+        **effort_kwargs
     )
 
     # 保存到代理池
