@@ -1,7 +1,8 @@
 // 给录好的手牌配音：只配回放画面上会放的台词和心声（和回放页共用同一个导演），
 // 文字先转成中文念法，音色用characters.js里的MiniMax预设音色，心声再做一层后期。
 // 说英语的角色（voice.lang = 'en'）先用 Claude 把中文翻成英文再念，字幕仍是中文。
-// 用法：node src/scripts/voice-hands.js --session s2e1 [--only 2,5] [--dry]
+// 用法：node src/scripts/voice-hands.js --session s2e1 [--only 2,5] [--redo claude,qwen] [--dry]
+// --redo 强制重配这些角色的句子（比如改了翻译要求以后）
 // 已经配过、文字和音色都没变的句子直接复用，不会重复花钱；换了音色的角色会重配。
 const fs = require('fs');
 const path = require('path');
@@ -19,7 +20,8 @@ const PRICE_PER_1K = 0.1;
 const TRANSLATE_MODEL = 'claude-opus-5-5';
 const TRANSLATE_SYSTEM = `你在给一档德州扑克节目写英文配音稿。角色“克劳德爵士”是六十岁的老派伦敦绅士，字幕是中文，配音念英文。
 把给你的这句中文翻成他会说出口的英文：客气、克制、带点不动声色的英式讽刺，口语化，适合念出来，长度和原句相当。
-扑克术语保留英文（3-bet、c-bet、all-in、range、EV 等），金额照写数字。
+扑克术语按英语牌手念出来的样子写（three-bet、c-bet、all-in、range、EV 等），金额照写数字。
+牌不要写成记号，要写成英语牌手嘴里的说法：QQ 写 pocket queens 或 queens，AA 写 aces，AK 写 ace-king，A9o 写 ace-nine offsuit，KJs 写 king-jack suited，Kh 写 king of hearts，K-9-4 写 king, nine, four；位置也写成说法：UTG 写 under the gun，BTN 写 the button，BB 写 the big blind。
 同桌的人用英文名：狂客=Grok，月学姐=Kimi，谷大小姐=Gemini，开总=GPT，老深=DeepSeek，千问=Qwen，豆包=Doubao。
 只输出译文本身，不加引号或解释。`;
 // 台词稍快带情绪；心声放慢放轻、语气平，再削掉刺耳的高频、加一点混响、左右声道错开，听起来像在脑子里
@@ -29,10 +31,11 @@ const INNER_FX = 'highpass=f=120,lowpass=f=6000,equalizer=f=3000:t=q:w=1.5:g=-2,
   + 'aecho=0.8:0.8:70|120|180:0.14|0.09|0.05,pan=stereo|c0=c0|c1=c0,adelay=0|16,loudnorm=I=-18';
 
 function parseArgs(argv) {
-  const args = { session: null, only: null, dry: false, parallel: 4 };
+  const args = { session: null, only: null, redo: [], dry: false, parallel: 4 };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--session') args.session = argv[++i];
     else if (argv[i] === '--only') args.only = argv[++i].split(',').map(Number);
+    else if (argv[i] === '--redo') args.redo = argv[++i].split(',');
     else if (argv[i] === '--dry') args.dry = true;
     else if (argv[i] === '--parallel') args.parallel = Number(argv[++i]);
   }
@@ -137,7 +140,8 @@ async function main() {
       total += line.text.length;
       const prev = old[line.k] && old[line.k][line.kind];
       manifest[line.k] = manifest[line.k] || {};
-      if (prev && prev.text === line.text && prev.voice === voiceOf(line.who).id && fs.existsSync(path.join(dir, prev.file))) {
+      const fresh = prev && prev.text === line.text && prev.voice === voiceOf(line.who).id && !args.redo.includes(line.who);
+      if (fresh && fs.existsSync(path.join(dir, prev.file))) {
         manifest[line.k][line.kind] = prev;
       } else {
         todo += line.text.length;
