@@ -24,7 +24,7 @@ const SEED_INNER_INSTRUCTION = '像在心里自言自语，小声、平静';
 const PRICE_PER_1K = 0.1;
 const TRANSLATE_MODEL = 'claude-opus-5-5';
 const TRANSLATE_SYSTEM = `你在给一档德州扑克节目写英文配音稿。角色“克劳德爵士”是六十岁的老派伦敦绅士，字幕是中文，配音念英文。
-把给你的这句中文翻成他会说出口的英文：客气、克制、带点不动声色的英式讽刺，口语化，适合念出来，长度和原句相当。
+把给你的这句中文翻成他会说出口的英文：客气、克制、带点不动声色的英式讽刺，口语化，适合念出来。只翻原句里有的意思，不要自己加话，宁短勿长。
 扑克术语按英语牌手念出来的样子写（three-bet、c-bet、all-in、range、EV 等），金额照写数字。
 牌不要写成记号，要写成英语牌手嘴里的说法：QQ 写 pocket queens 或 queens，AA 写 aces，AK 写 ace-king，A9o 写 ace-nine offsuit，KJs 写 king-jack suited，Kh 写 king of hearts，K-9-4 写 king, nine, four；位置也写成说法：UTG 写 under the gun，BTN 写 the button，BB 写 the big blind。
 同桌的人用英文名：狂客=Grok，月学姐=Kimi，谷大小姐=Gemini，开总=GPT，老深=DeepSeek，千问=Qwen，豆包=Doubao。

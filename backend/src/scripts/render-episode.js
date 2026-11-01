@@ -114,7 +114,8 @@ async function main() {
 
   // 录下来的 webm 是变帧率的，转成 30fps 定帧率的 H.264 + AAC
   console.log('转码成 MP4…');
-  await ffmpeg(['-i', webm, '-r', '30', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+  // 开头 0.8 秒是开录到开播之间的黑场，剪掉 0.7 秒
+  await ffmpeg(['-ss', '0.7', '-i', webm, '-r', '30', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
     '-af', 'alimiter=limit=0.89:level=false', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', out]);
   fs.unlinkSync(webm);
   console.log(`完成 -> ${out}`);

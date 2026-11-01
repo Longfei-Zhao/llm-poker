@@ -358,6 +358,7 @@ body.render { overflow: hidden; }
 #stage.dusk #world { filter: brightness(0.35) saturate(0.8); transition: filter 3s; }
 #ep.blackout { background: #000; transition: background 0.8s; }
 #ep .endcard { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.4s; }
+#ep.endon { background: #000; }
 #ep.endon .endcard { opacity: 1; }
 #ep .sweep { display: none; position: absolute; inset: 0; background: #05060B; }
 #ep.sweepon .sweep { display: block; }
@@ -430,15 +431,21 @@ body.render { overflow: hidden; }
 #ep .outro .t1 { font-family: var(--brush); font-size: 130px; color: var(--gold); text-shadow: 6px 6px 0 #000; }
 /* 解说铁皮：固定在右上角（顶栏“解说 · 铁皮”的位置下面），他的话显示在头像左边；选手的话才放底部字幕 */
 #laok { position: absolute; right: 26px; top: 46px; z-index: 125; display: none; align-items: flex-start; gap: 14px; pointer-events: none; transition: right 0.75s cubic-bezier(0.6, 0, 0.2, 1), top 0.75s cubic-bezier(0.6, 0, 0.2, 1); }
-#laok.center { right: 300px; top: 230px; width: 1000px; flex-direction: column-reverse; align-items: center; gap: 30px; }
-#laok.center #laoksay { margin: 0; font-size: 42px; text-align: center; background: none; box-shadow: none; }
+#laok.still { animation: none !important; }
+#laokbig { position: absolute; left: 0; right: 0; top: 220px; z-index: 126; display: none; flex-direction: column; align-items: center; gap: 30px; pointer-events: none; }
+#laokbig.show { display: flex; }
+#laokbig .kface { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+#laokbig img { width: 230px; height: 230px; border-radius: 50%; object-fit: cover; object-position: 50% 12%; background: #F5C451; box-shadow: 0 0 0 5px #05060B, 0 0 0 9px #F5C451; transition: transform 0.85s cubic-bezier(0.65, 0, 0.25, 1); }
+#laokbig.talk img { animation: talk 0.32s ease-in-out infinite alternate; }
+#laokbig span { font-family: var(--display); font-size: 26px; color: #F5C451; transition: opacity 0.3s; }
+#laokbig.moving span { opacity: 0; }
+#laokbigsay { margin: 0; max-width: 1100px; padding: 10px 24px; border-radius: 12px; font-size: 42px; font-weight: 900; line-height: 1.45; color: #FFF; text-align: center; text-shadow: 0 3px 0 #000; transition: background 0.3s; }
+#laokbig.overui #laokbigsay { background: rgba(5,6,11,0.85); }
 #laok.show { display: flex; animation: popUp 0.4s both; }
 #laok .kface { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-#laok.center .kface { gap: 24px; }
 #laok img { transition: width 0.75s, height 0.75s; width: 104px; height: 104px; border-radius: 50%; object-fit: cover; object-position: 50% 12%; background: #F5C451; box-shadow: 0 0 0 4px #05060B, 0 0 0 7px #F5C451; }
 #laok.talk img { animation: talk 0.32s ease-in-out infinite alternate; box-shadow: 0 0 0 4px #05060B, 0 0 0 7px #F5C451, 0 0 28px #F5C451; }
 @keyframes talk { from { transform: scale(1); } to { transform: scale(1.06) rotate(-2deg); } }
-#laok.center img { width: 230px; height: 230px; }
 #laok .kface span { font-family: var(--display); font-size: 20px; color: #F5C451; background: rgba(5,6,11,0.85); padding: 1px 12px; border-radius: 4px; }
 #laoksay { margin: 18px 0 0; max-width: 880px; padding: 12px 20px; border-radius: 10px; background: rgba(5,6,11,0.82); box-shadow: inset 0 0 0 2px rgba(245,196,81,0.55); font-size: 30px; font-weight: 900; line-height: 1.45; color: #FFF; text-align: right; opacity: 0; transition: opacity 0.2s; }
 #laoksay.show { opacity: 1; }
@@ -534,6 +541,7 @@ body.render { overflow: hidden; }
           <div id="epsub"><div class="who" id="epsubwho"></div><p id="epsubp"></p></div>
         </div>
         <div id="boomring"></div>
+        <div id="laokbig"><div class="kface"><img src="portraits/laok.png" alt=""><span>铁皮</span></div><p id="laokbigsay"></p></div>
         <div id="laok"><p id="laoksay"></p><div class="kface"><img src="portraits/laok.png" alt=""><span>铁皮</span></div></div>
         <div id="handcard"><small id="hcno"></small><b id="hctitle"></b></div>
         <div class="overlay" id="end">
@@ -954,7 +962,7 @@ async function type(node, txt, ms) { if (FF) { node.textContent = txt; return; }
 const SFX_GAIN = { deal: 1.4, flip: 1.0, chips: 0.8, allin_chips: 0.9, collect: 1.1, check: 0.9, fold: 2.6, impact: 0.6, allin_sting: 0.8, allin_shout: 1.6, win: 0.7, whoosh: 0.9, slam: 0.7, glass_crack: 0.9, glass_break: 0.9 };
 // 全下特写里的喊声：每个角色自己的声音（sfx/allin_<id>.mp3），没有的用解说的喊声
 for (const id of ['claude', 'gpt', 'gemini', 'deepseek', 'qwen', 'grok', 'kimi', 'doubao']) SFX_GAIN[`allin_${id}`] = 1.4;
-const MUSIC_VOL = 0.3, MUSIC_DUCKED = 0.13;
+const MUSIC_VOL = 0.28, MUSIC_DUCKED = 0.11;
 const AC = new (window.AudioContext || window.webkitAudioContext)();
 const master = AC.createGain(), music = AC.createGain(), fx = AC.createGain();
 music.gain.value = MUSIC_VOL;
@@ -1020,7 +1028,7 @@ function theme(on) {
 }
 // 有人说话时把音乐压低
 // 片头主题曲在旁白下只压一点，保住气势
-function duck(on) { music.gain.setTargetAtTime(on ? (themeOn ? 0.19 : MUSIC_DUCKED) : MUSIC_VOL, AC.currentTime, 0.2); }
+function duck(on) { music.gain.setTargetAtTime(on ? (themeOn ? 0.15 : MUSIC_DUCKED) : MUSIC_VOL, AC.currentTime, 0.2); }
 document.addEventListener('pointerdown', () => { if (!paused && AC.state !== 'running') AC.resume().then(startMusic); });
 
 // ---------- voice: 配好的台词和心声（/voice/<手牌id>/manifest.json，按事件序号对上） ----------
@@ -1415,12 +1423,46 @@ function showSrc(key) {
   const v = SHOWVOICE[key] && SHOWVOICE[key].sp;
   return v ? `/voice/show-${encodeURIComponent(EP.session)}/${v.file}` : null;
 }
+// 大头像飞到右上角：算出角落头像的位置，用 transform 平滑缩过去；字留在中间说完
+function laokToCorner() {
+  const big = $('#laokbig'), img = big.querySelector('img'), corner = $('#laok');
+  corner.classList.add('show', 'still');
+  corner.style.visibility = 'hidden';
+  $('#laoksay').classList.remove('show');
+  const a = img.getBoundingClientRect(), b = corner.querySelector('img').getBoundingClientRect();
+  const sc = stage.getBoundingClientRect().width / 1600;
+  // 先停掉说话的跳动并让样式落定，否则 transform 直接跳到终点、不走过渡
+  big.classList.remove('talk');
+  big.classList.add('moving', 'overui');
+  void getComputedStyle(img).transform;
+  img.style.transform = `translate(${((b.left + b.width / 2) - (a.left + a.width / 2)) / sc}px, ${((b.top + b.height / 2) - (a.top + a.height / 2)) / sc}px) scale(${b.width / a.width})`;
+}
+// 这句说完：换成角落里的那个头像，大头像收掉
+function laokSettle() {
+  const big = $('#laokbig');
+  $('#laok').style.visibility = '';
+  $('#laok').classList.add('show', 'still');
+  big.classList.remove('show', 'moving', 'overui', 'talk');
+  big.querySelector('img').style.transform = '';
+}
 function laok(show) {
   $('#laok').classList.toggle('show', show);
-  if (!show) $('#laok').classList.remove('center');
+  if (!show) { $('#laok').classList.remove('still'); $('#laokbig').classList.remove('show', 'moving', 'overui', 'talk'); }
   if (!show) { $('#laok').classList.remove('talk'); $('#laoksay').classList.remove('show'); }
 }
 async function narrate(who, text, src) {
+  if (who === NARR.id && $('#laokbig').classList.contains('show')) {
+    const big = $('#laokbig');
+    $('#laokbigsay').textContent = '';
+    if (!big.classList.contains('moving')) big.classList.add('talk');
+    try {
+      await speak($('#laokbigsay'), text, 55, src);
+    } finally {
+      big.classList.remove('talk');
+    }
+    await W(300);
+    return;
+  }
   if (who === NARR.id) {
     $('#epsub').classList.remove('show');
     $('#laoksay').textContent = '';
@@ -1505,8 +1547,9 @@ async function epIntro() {
   ep.className = 'on dark';
   fxLevel(0.45);
   theme(true);
-  $('#laok').classList.add('center');
-  laok(true);
+  laok(false);
+  $('#laokbigsay').textContent = '';
+  $('#laokbig').classList.add('show');
   sfx('slam', 0.7);
   await W(700);
   await line(0);
@@ -1514,11 +1557,12 @@ async function epIntro() {
   later(2500, () => {
     ep.className = 'on oldon';
     old.classList.add('popin');
-    $('#laok').classList.remove('center');
+    laokToCorner();
     sfx('whoosh');
     later(80, () => old.classList.add('drift'));
   });
   await line(1);
+  laokSettle();
   // “闷头打牌，一句话都不说”：镜头推到牌桌，八个头像挨个亮一下、冒“……”
   oc.classList.add('cam-table');
   old.classList.add('pulse');
@@ -1731,7 +1775,9 @@ async function endCard() {
 async function epSegment(i, me) {
   const it = EP.items[i];
   EP.idx = i; EP.segT = 0;
-  await epPrepare(it.kind === 'hand' ? it.pos : it.kind === 'intro' ? 1 : EP.hands.length);
+  const lastHand = EP.hands[EP.hands.length - 1];
+  const keepTable = it.kind === 'outro' && LOG && lastHand && LOG.orig === lastHand.hand && G.length;
+  if (!keepTable) await epPrepare(it.kind === 'hand' ? it.pos : it.kind === 'intro' ? 1 : EP.hands.length);
   if (me !== EPRUN) return;
   $('#epsub').classList.remove('show');
   $('#handcard').classList.remove('show');
@@ -1748,7 +1794,8 @@ async function epSegment(i, me) {
     await start(0);
     return;
   }
-  run++; hush(); reset();
+  run++; hush();
+  if (!keepTable) reset();
   stage.classList.add('eponly');
   try { await (it.kind === 'intro' ? epIntro() : epOutro()); } catch (e) { if (e !== STOP) throw e; }
   if (it.kind === 'intro' && me === EPRUN) stage.classList.remove('eponly');
@@ -1837,7 +1884,8 @@ async function epStart() {
   btn.textContent = '退出整集';
   btn.onclick = () => location.reload();
   // 渲染时由录制脚本在开始录像之后再调 __play
-  if (RENDER) { window.__play = () => epGo(0); window.__ready = true; return; }
+  // 开录前黑屏、牌局音乐先静音（片头一开始由主题曲接管），免得开头漏出一小段别的画面和音乐
+  if (RENDER) { $('#ep').className = 'on dark'; laok(false); bgmGain.gain.value = 0; window.__play = () => epGo(0); window.__ready = true; return; }
   epGo(0);
 }
 $('#epbtn').addEventListener('click', () => { if (!EP) epStart(); });
